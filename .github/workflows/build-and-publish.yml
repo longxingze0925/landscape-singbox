@@ -1,0 +1,119 @@
+name: Build and Publish Proxy Image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      landscape_repository:
+        description: Landscape source repository
+        required: true
+        default: ThisSeanZhang/landscape
+      landscape_ref:
+        description: Landscape source branch, tag, or commit
+        required: true
+        default: main
+      sing_box_version:
+        description: sing-box version without leading v
+        required: true
+        default: 1.12.22
+      image_tag:
+        description: Image tag to publish
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  LANDSCAPE_REPOSITORY: ${{ inputs.landscape_repository || 'ThisSeanZhang/landscape' }}
+  LANDSCAPE_REF: ${{ inputs.landscape_ref || 'main' }}
+  SING_BOX_VERSION: ${{ inputs.sing_box_version || '1.12.22' }}
+  IMAGE_TAG: ${{ inputs.image_tag || 'latest' }}
+  TARGET_ARCH: x86_64-unknown-linux-gnu
+  DOCKER_PLATFORM: linux/amd64
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout image repository
+        uses: actions/checkout@v4
+        with:
+          path: image
+
+      - name: Checkout Landscape source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LANDSCAPE_REPOSITORY }}
+          ref: ${{ env.LANDSCAPE_REF }}
+          path: landscape
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang curl gcc llvm make pkg-config libelf-dev libclang-dev zlib1g-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET_ARCH }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            landscape/target
+          key: cargo-${{ runner.os }}-${{ env.TARGET_ARCH }}-${{ hashFiles('landscape/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ env.TARGET_ARCH }}-
+
+      - name: Build redirect package handler
+        working-directory: landscape
+        run: |
+          cargo build --release \
+            --package landscape-ebpf \
+            --bin redirect_pkg_handler \
+            --target "$TARGET_ARCH"
+
+      - name: Prepare Docker build context
+        run: |
+          rm -rf build-context
+          mkdir -p build-context/apps
+
+          cp "landscape/target/${TARGET_ARCH}/release/redirect_pkg_handler" \
+             build-context/apps/redirect_pkg_handler
+          cp image/dockerfiles/proxy/start.sh build-context/apps/start.sh
+          cp image/dockerfiles/proxy/Dockerfile build-context/Dockerfile
+
+          chmod +x build-context/apps/redirect_pkg_handler build-context/apps/start.sh
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        working-directory: build-context
+        run: |
+          OWNER_LOWER="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE_NAME="ghcr.io/${OWNER_LOWER}/landscape-singbox"
+          SHORT_SHA="${GITHUB_SHA::12}"
+
+          docker buildx build \
+            --platform "$DOCKER_PLATFORM" \
+            --build-arg "SING_BOX_VERSION=$SING_BOX_VERSION" \
+            -t "${IMAGE_NAME}:${IMAGE_TAG}" \
+            -t "${IMAGE_NAME}:${SHORT_SHA}" \
+            --push \
+            .
