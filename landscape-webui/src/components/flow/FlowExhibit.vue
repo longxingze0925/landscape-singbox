@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { getFlowRuleByFlowId } from "@landscape-router/types/api/flow-rules/flow-rules";
 import type { FlowConfig } from "@landscape-router/types/api/schemas";
-import { onMounted, ref, watch, watchEffect } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { Docker, NetworkWired } from "@vicons/fa";
 import { useFrontEndStore } from "@/stores/front_end_config";
 import { useI18n } from "vue-i18n";
@@ -29,6 +29,16 @@ const config = ref<FlowConfig>();
 async function refresh() {
   config.value = await getFlowRuleByFlowId(props.flow_id);
 }
+
+function targetLabel(target: FlowConfig["flow_targets"][number]["target"]) {
+  if (target.t === "netns") {
+    return frontEndStore.MASK_INFO(target.container_name);
+  }
+  if (target.t === "proxy") {
+    return `${t("routes.proxy")}: ${target.mode} ${target.node_id.slice(0, 8)}`;
+  }
+  return frontEndStore.MASK_INFO(target.name);
+}
 </script>
 <template>
   <n-popover v-if="config" trigger="hover">
@@ -44,11 +54,7 @@ async function refresh() {
           v-for="each in config.flow_targets"
           :bordered="false"
         >
-          {{
-            each.target.t === "netns"
-              ? frontEndStore.MASK_INFO(each.target.container_name)
-              : frontEndStore.MASK_INFO(each.target.name)
-          }}
+          {{ targetLabel(each.target) }}
           <span v-if="(each.weight ?? 1) !== 1"> ×{{ each.weight ?? 1 }}</span>
           <template #icon>
             <n-icon

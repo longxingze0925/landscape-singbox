@@ -43,6 +43,21 @@ const title_name = computed(() =>
     ? t("common.no_remark")
     : frontEndStore.MASK_INFO(props.config.remark),
 );
+
+function targetLabel(target: FlowConfig["flow_targets"][number]["target"]) {
+  if (target.t === "netns") {
+    return frontEndStore.MASK_INFO(target.container_name);
+  }
+  if (target.t === "proxy") {
+    return `${t("routes.proxy")}: ${target.mode} ${target.node_id.slice(0, 8)}`;
+  }
+  return frontEndStore.MASK_INFO(target.name);
+}
+
+function targetIcon(target: FlowConfig["flow_targets"][number]["target"]) {
+  if (target.t === "netns") return Docker;
+  return NetworkWired;
+}
 </script>
 
 <template>
@@ -149,16 +164,10 @@ const title_name = computed(() =>
     </n-flex>
     <template #action>
       <n-tag v-for="each in config.flow_targets" :bordered="false">
-        {{
-          each.target.t === "netns"
-            ? frontEndStore.MASK_INFO(each.target.container_name)
-            : frontEndStore.MASK_INFO(each.target.name)
-        }}
+        {{ targetLabel(each.target) }}
         <span v-if="(each.weight ?? 1) !== 1"> ×{{ each.weight ?? 1 }}</span>
         <template #icon>
-          <n-icon
-            :component="each.target.t === 'netns' ? Docker : NetworkWired"
-          />
+          <n-icon :component="targetIcon(each.target)" />
         </template>
       </n-tag>
     </template>

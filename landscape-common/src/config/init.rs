@@ -27,6 +27,7 @@ use crate::iface::wifi::WifiServiceConfig;
 use crate::ip_mark::WanIpRuleConfig;
 use crate::ipv6::lan::LanIPv6ServiceConfigV2;
 use crate::ipv6::ra::IPV6RAServiceConfig;
+use crate::proxy::ProxyNodeConfig;
 use crate::route::lan::RouteLanServiceConfig;
 use crate::route::wan::RouteWanServiceConfig;
 
@@ -95,6 +96,8 @@ pub struct InitConfig {
     pub ddns_jobs: Vec<DdnsJob>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dns_provider_profiles: Vec<DnsProviderProfile>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub proxy_nodes: Vec<ProxyNodeConfig>,
 }
 
 #[cfg(test)]

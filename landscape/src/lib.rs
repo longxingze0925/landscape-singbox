@@ -25,6 +25,7 @@ pub mod metric;
 pub mod netlink;
 pub mod observer;
 pub mod pppoe_client;
+pub mod proxy;
 pub mod route;
 pub mod sys_service;
 pub mod wifi;

@@ -18,6 +18,7 @@ import pppd_editor from "./pppd_editor";
 import dhcp_v6 from "./dhcp_v6";
 import cert from "./cert";
 import gateway from "./gateway";
+import proxy from "./proxy";
 
 export default {
   metric: {
@@ -42,6 +43,7 @@ export default {
   dhcp_v6,
   cert,
   gateway,
+  proxy,
   common: {
     private_mode: "隐私模式",
     create: "创建",
@@ -162,5 +164,6 @@ export default {
     "cert-accounts": "ACME 账户",
     certs: "证书管理",
     gateway: "内网 HTTP 反代",
+    proxy: "代理节点",
   },
 };

@@ -124,8 +124,10 @@ export default {
     add_target_rule: "Add egress rule",
     type_wan: "WAN Interface",
     type_docker: "Docker",
+    type_proxy: "Proxy",
     iface_placeholder: "Interface name",
     container_placeholder: "Container name",
+    proxy_placeholder: "Proxy node",
     weight_placeholder: "Weight",
   },
   wan_rule_card: {

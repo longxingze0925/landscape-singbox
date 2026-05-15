@@ -3,10 +3,33 @@ use std::net::{IpAddr, Ipv4Addr};
 use futures::stream::TryStreamExt;
 use netlink_packet_route::address::{AddressAttribute, AddressMessage};
 use netlink_packet_route::AddressFamily;
-use rtnetlink::Handle;
+use rtnetlink::{Error as NetlinkError, Handle};
 use serde::Serialize;
 
 use super::handle::create_handle;
+
+fn is_addr_exist_error(err: &NetlinkError) -> bool {
+    matches!(err, NetlinkError::NetlinkError(msg) if msg.raw_code() == -libc::EEXIST)
+}
+
+async fn add_address_if_missing(
+    handle: &Handle,
+    link_index: u32,
+    link_name: &str,
+    ip: IpAddr,
+    prefix_length: u8,
+) -> Result<(), NetlinkError> {
+    match handle.address().add(link_index, ip, prefix_length).execute().await {
+        Ok(()) => Ok(()),
+        Err(err) if is_addr_exist_error(&err) => {
+            tracing::debug!(
+                "address {ip}/{prefix_length} already exists on {link_name}, skip adding"
+            );
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
 
 #[derive(Serialize, Debug, Clone)]
 pub struct LandscapeSingleIpInfo {
@@ -118,7 +141,9 @@ pub async fn set_iface_ip(link_name: &str, ip: IpAddr, prefix_length: u8) -> boo
 
         if !has_same_ip {
             tracing::info!("without same ip, add it");
-            handle.address().add(link.header.index, ip, prefix_length).execute().await.unwrap();
+            add_address_if_missing(&handle, link.header.index, link_name, ip, prefix_length)
+                .await
+                .unwrap();
         }
         true
     } else {
@@ -171,44 +196,33 @@ pub async fn add_address_with_handle(
 ) {
     let mut links = handle.link().get().match_name(link_name.to_string()).execute();
     if let Some(link) = links.try_next().await.unwrap() {
-        let mut addr_iter = handle.address().get().execute();
+        let mut addr_iter =
+            handle.address().get().set_link_index_filter(link.header.index).execute();
         // 与要添加的 ip 是否相同
         let mut need_create_ip = true;
         while let Some(addr) = addr_iter.try_next().await.unwrap() {
             let perfix_len_equal = addr.header.prefix_len == prefix_length;
-            let mut link_name_equal = false;
             let mut ip_equal = false;
 
             for attr in addr.attributes.iter() {
-                match attr {
-                    AddressAttribute::Address(addr) => {
-                        if *addr == ip {
-                            ip_equal = true;
-                        }
+                if let AddressAttribute::Address(addr) = attr {
+                    if *addr == ip {
+                        ip_equal = true;
                     }
-                    AddressAttribute::Label(label) => {
-                        if *label == link_name.to_string() {
-                            link_name_equal = true;
-                        }
-                    }
-                    _ => {}
                 }
             }
 
-            if link_name_equal {
-                if ip_equal && perfix_len_equal {
-                    need_create_ip = false;
-                } else {
-                    tracing::info!("stop dhcp v4 server and del: {addr:?}");
-                    handle.address().del(addr).execute().await.unwrap();
-                    need_create_ip = true;
-                }
+            if ip_equal && perfix_len_equal {
+                need_create_ip = false;
+                break;
             }
         }
 
         if need_create_ip {
             // tracing::info!("need create ip: {need_create_ip:?}");
-            handle.address().add(link.header.index, ip, prefix_length).execute().await.unwrap()
+            add_address_if_missing(&handle, link.header.index, link_name, ip, prefix_length)
+                .await
+                .unwrap();
         }
     }
 }

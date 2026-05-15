@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { get_docker_container_summarys } from "@/api/docker";
 import { get_wan_candidates } from "@/api/iface";
+import { get_proxy_nodes } from "@/api/proxy";
 import type {
   FlowTarget,
+  ProxyNodeConfig,
   WeightedFlowTarget,
 } from "@landscape-router/types/api/schemas";
 import { computed, onMounted, ref } from "vue";
@@ -16,14 +18,16 @@ const target_rules = defineModel<WeightedFlowTarget[]>("target_rules", {
 
 const iface_wans = ref<string[]>([]);
 const docker_containers = ref<any[]>([]);
+const proxy_nodes = ref<ProxyNodeConfig[]>([]);
 
 onMounted(async () => {
-  await refresh_wan_ifaces();
+  await refresh_options();
 });
 
-async function refresh_wan_ifaces() {
+async function refresh_options() {
   iface_wans.value = await get_wan_candidates();
   docker_containers.value = await get_docker_container_summarys();
+  proxy_nodes.value = await get_proxy_nodes();
 }
 
 const iface_wan_options = computed(() =>
@@ -43,9 +47,30 @@ const docker_options = computed(() =>
   }),
 );
 
+const proxy_options = computed(() =>
+  proxy_nodes.value
+    .filter((node): node is ProxyNodeConfig & { id: string } => !!node.id)
+    .map((node) => ({
+      label: node.name || node.server,
+      value: node.id,
+    })),
+);
+
+const proxy_mode_options = computed(() => [
+  {
+    label: t("proxy.mode_global"),
+    value: "global",
+  },
+  {
+    label: t("proxy.mode_bypass_china"),
+    value: "bypass_china",
+  },
+]);
+
 enum FlowTargetEnum {
   Interface = "interface",
   NetNS = "netns",
+  Proxy = "proxy",
 }
 
 function onCreate(): WeightedFlowTarget {
@@ -65,6 +90,10 @@ function target_type_option(): any[] {
       label: t("flow.target_rule.type_docker"),
       value: "netns",
     },
+    {
+      label: t("flow.target_rule.type_proxy"),
+      value: "proxy",
+    },
   ];
 }
 
@@ -78,11 +107,20 @@ function handleUpdateValue(value: FlowTarget["t"], index: number) {
       },
       weight,
     };
-  } else {
+  } else if (value == FlowTargetEnum.NetNS) {
     target_rules.value[index] = {
       target: {
         t: FlowTargetEnum.NetNS,
         container_name: "",
+      },
+      weight,
+    };
+  } else {
+    target_rules.value[index] = {
+      target: {
+        t: FlowTargetEnum.Proxy,
+        node_id: "",
+        mode: "global",
       },
       weight,
     };
@@ -125,6 +163,19 @@ function handleUpdateValue(value: FlowTarget["t"], index: number) {
           :options="docker_options"
           :placeholder="t('flow.target_rule.container_placeholder')"
         />
+        <template v-else-if="value.target.t == 'proxy'">
+          <n-select
+            v-model:value="value.target.node_id"
+            :style="{ width: '36%' }"
+            :options="proxy_options"
+            :placeholder="t('flow.target_rule.proxy_placeholder')"
+          />
+          <n-select
+            v-model:value="value.target.mode"
+            :style="{ width: '20%' }"
+            :options="proxy_mode_options"
+          />
+        </template>
 
         <n-input-number
           v-model:value="value.weight"

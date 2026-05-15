@@ -6,7 +6,8 @@ use landscape_common::{config::FlowId, service::controller::ConfigController};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use landscape_common::flow::FlowRuleError;
+use landscape_common::flow::{FlowRuleError, FlowTarget};
+use landscape_common::proxy::ProxyError;
 
 use crate::api::JsonBody;
 use crate::LandscapeApp;
@@ -28,6 +29,21 @@ fn has_only_zero_weight_targets(flow_rule: &FlowConfig) -> bool {
 
 fn has_too_many_targets(flow_rule: &FlowConfig) -> bool {
     flow_rule.flow_targets.len() > MAX_FLOW_TARGETS
+}
+
+async fn validate_proxy_targets_exist(
+    state: &LandscapeApp,
+    flow_rule: &FlowConfig,
+) -> LandscapeApiResult<()> {
+    for target in &flow_rule.flow_targets {
+        if let FlowTarget::Proxy { node_id, .. } = target.target {
+            if state.proxy_node_service.find_by_id(node_id).await.is_none() {
+                Err(ProxyError::NodeNotFound(node_id))?;
+            }
+        }
+    }
+
+    LandscapeApiResp::success(())
 }
 
 #[utoipa::path(
@@ -107,6 +123,9 @@ async fn add_flow_rule(
         Err(FlowRuleError::TooManyTargets)?;
     }
 
+    validate_proxy_targets_exist(&state, &flow_rule).await?;
+    state.proxy_bypass_service.ensure_flow_ready(&flow_rule).await?;
+
     // Check for duplicate entry rules within the submitted config itself
     {
         let mut seen = std::collections::HashSet::new();
@@ -142,6 +161,7 @@ async fn add_flow_rule(
     }
 
     let result = state.flow_rule_service.checked_set(flow_rule).await?;
+    state.proxy_bypass_service.sync_flow(&result).await?;
     LandscapeApiResp::success(result)
 }
 
@@ -159,6 +179,10 @@ async fn del_flow_rule(
     State(state): State<LandscapeApp>,
     Path(id): Path<ConfigId>,
 ) -> LandscapeApiResult<()> {
+    let flow_id = state.flow_rule_service.find_by_id(id).await.map(|flow| flow.flow_id);
     state.flow_rule_service.delete(id).await;
+    if let Some(flow_id) = flow_id {
+        state.proxy_bypass_service.remove_flow(flow_id).await;
+    }
     LandscapeApiResp::success(())
 }

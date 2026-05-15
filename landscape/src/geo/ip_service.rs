@@ -25,6 +25,8 @@ use landscape_database::{
 use reqwest::Client;
 use tokio::sync::{broadcast, Mutex};
 
+use super::GeoRefreshRuntimeStatus;
+
 const A_DAY: u64 = 60 * 60 * 24;
 
 pub type GeoDomainCacheStore = Arc<Mutex<StoreFileManager<GeoFileCacheKey, GeoIpConfig>>>;
@@ -34,6 +36,7 @@ pub struct GeoIpService {
     store: GeoIpSourceConfigRepository,
     file_cache: GeoDomainCacheStore,
     dst_ip_events_tx: broadcast::Sender<DstIpEvent>,
+    refresh_status: Arc<Mutex<HashMap<String, GeoRefreshRuntimeStatus>>>,
 }
 
 impl GeoIpService {
@@ -48,7 +51,12 @@ impl GeoIpService {
             "ip".to_string(),
         )));
 
-        let service = Self { store, file_cache, dst_ip_events_tx };
+        let service = Self {
+            store,
+            file_cache,
+            dst_ip_events_tx,
+            refresh_status: Arc::new(Mutex::new(HashMap::new())),
+        };
         let service_clone = service.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(A_DAY));
@@ -153,7 +161,7 @@ impl GeoIpService {
                                             *next_update_at =
                                                 get_f64_timestamp() + MILL_A_DAY as f64;
                                         }
-                                        let _ = self.store.set(config).await;
+                                        let _ = self.store.set(config.clone()).await;
 
                                         tracing::debug!(
                                             "handle file done: {}, time: {}s",
@@ -161,33 +169,45 @@ impl GeoIpService {
                                             time.elapsed().as_secs()
                                         );
                                         self.notify_dst_ip_updated();
+                                        self.record_refresh_success(&config.name).await;
                                     }
                                     Err(e) => {
+                                        let error = format!("parse source error: {e}");
                                         tracing::error!(
                                             "parse geo ip source {} error: {}",
                                             config.name,
                                             e
                                         );
+                                        self.record_refresh_error(&config.name, error).await;
                                     }
                                 }
                             }
-                            Err(e) => tracing::error!("read {} response error: {}", url, e),
+                            Err(e) => {
+                                let error = format!("read response error: {e}");
+                                tracing::error!("read {} response error: {}", url, e);
+                                self.record_refresh_error(&config.name, error).await;
+                            }
                         },
                         Ok(resp) => {
+                            let error = format!("HTTP status: {}", resp.status());
                             tracing::error!(
                                 "download {} error, HTTP status: {}",
                                 url,
                                 resp.status()
                             );
+                            self.record_refresh_error(&config.name, error).await;
                         }
                         Err(e) => {
+                            let error = format!("request error: {e}");
                             tracing::error!("request {} error: {}", url, e);
+                            self.record_refresh_error(&config.name, error).await;
                         }
                     }
                 }
                 GeoIpSource::Direct { data } => {
                     self.write_direct_to_cache(&config.name, data).await;
                     self.notify_dst_ip_updated();
+                    self.record_refresh_success(&config.name).await;
                 }
             }
         }
@@ -308,6 +328,10 @@ impl GeoIpService {
         lock.get(key)
     }
 
+    pub async fn get_refresh_status(&self, name: &str) -> GeoRefreshRuntimeStatus {
+        self.refresh_status.lock().await.get(name).cloned().unwrap_or_default()
+    }
+
     pub async fn query_geo_by_name(&self, name: Option<String>) -> Vec<GeoIpSourceConfig> {
         self.store.query_by_name(name).await.unwrap()
     }
@@ -327,6 +351,18 @@ impl GeoIpService {
         self.replace_cache_by_name(&name, result).await;
         self.notify_dst_ip_updated();
         Ok(())
+    }
+
+    async fn record_refresh_success(&self, name: &str) {
+        let mut lock = self.refresh_status.lock().await;
+        let status = lock.entry(name.to_string()).or_default();
+        status.last_success_at = Some(get_f64_timestamp());
+        status.last_error = None;
+    }
+
+    async fn record_refresh_error(&self, name: &str, error: String) {
+        let mut lock = self.refresh_status.lock().await;
+        lock.entry(name.to_string()).or_default().last_error = Some(error);
     }
 }
 

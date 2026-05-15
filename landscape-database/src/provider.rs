@@ -28,8 +28,8 @@ use crate::{
     iface::repository::NetIfaceRepository, iface_ip::repository::IfaceIpServiceRepository,
     lan_ipv6_v2::repository::LanIPv6V2ServiceRepository,
     mss_clamp::repository::MssClampServiceRepository, nat::repository::NatServiceRepository,
-    pppd::repository::PPPDServiceRepository, ra::repository::IPV6RAServiceRepository,
-    route_lan::repository::RouteLanServiceRepository,
+    pppd::repository::PPPDServiceRepository, proxy::repository::ProxyNodeRepository,
+    ra::repository::IPV6RAServiceRepository, route_lan::repository::RouteLanServiceRepository,
     route_wan::repository::RouteWanServiceRepository,
     static_nat_mapping::repository::StaticNatMappingConfigRepository,
     wifi::repository::WifiServiceRepository,
@@ -194,6 +194,7 @@ define_store!(
     gateway_http_upstream_store: (GatewayHttpUpstreamRepository, gateway_rules),
     dns_provider_profile_store: (DnsProviderProfileRepository, dns_provider_profiles),
     ddns_job_store: (DdnsJobRepository, ddns_jobs),
+    proxy_node_store: (ProxyNodeRepository, proxy_nodes),
 );
 
 #[cfg(test)]

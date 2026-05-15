@@ -33,6 +33,7 @@ pub mod route_lan;
 pub mod route_wan;
 
 pub mod nat;
+pub mod proxy;
 pub mod static_nat_mapping;
 
 pub mod cert;

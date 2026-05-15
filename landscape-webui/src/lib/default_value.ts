@@ -13,6 +13,7 @@ export function flow_config_default(): FlowConfig {
 export enum FlowTargetTypes {
   INTERFACE = "interface",
   NETNS = "netns",
+  PROXY = "proxy",
 }
 
 export function flow_target_options(): { label: string; value: string }[] {
@@ -24,6 +25,10 @@ export function flow_target_options(): { label: string; value: string }[] {
     {
       label: "Docker 容器名称",
       value: FlowTargetTypes.NETNS,
+    },
+    {
+      label: "代理节点",
+      value: FlowTargetTypes.PROXY,
     },
   ];
 }

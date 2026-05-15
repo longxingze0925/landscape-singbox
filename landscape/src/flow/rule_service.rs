@@ -1,6 +1,7 @@
 use landscape_common::{
     error::LdError,
     event::{dns::DnsEvent, route::RouteEvent},
+    flow::FlowTarget,
     flow::{config::FlowConfig, FlowEntryMatchMode},
     service::controller::{ConfigController, FlowConfigController},
 };
@@ -88,6 +89,10 @@ impl FlowRuleService {
         modes: &[FlowEntryMatchMode],
     ) -> Result<(), LdError> {
         self.store.validate_modes_resolvable(modes).await
+    }
+
+    pub async fn find_by_target(&self, target: FlowTarget) -> Result<Vec<FlowConfig>, LdError> {
+        self.store.find_by_target(target).await
     }
 }
 

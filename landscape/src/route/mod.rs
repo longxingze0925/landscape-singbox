@@ -17,7 +17,9 @@ use landscape_common::{
     flow::{config::FlowConfig, FlowTarget},
     route::{LanIPv6RouteKey, LanRouteInfo, LanRouteMode, RouteTargetInfo},
 };
-use landscape_database::flow_rule::repository::FlowConfigRepository;
+use landscape_database::flow_rule::repository::{
+    resolve_flow_target_for_route, FlowConfigRepository,
+};
 use landscape_dns::server::LocalDnsAnswerProvider;
 use landscape_ebpf::map_setting::route::{add_lan_route, del_lan_route};
 use tokio::sync::{broadcast, mpsc, RwLock};
@@ -165,6 +167,10 @@ fn find_route_target<'a>(
     match target {
         FlowTarget::Interface { name } => wan_infos.get(name),
         FlowTarget::Netns { container_name } => wan_infos.get(container_name),
+        FlowTarget::Proxy { .. } => match resolve_flow_target_for_route(target) {
+            FlowTarget::Netns { container_name } => wan_infos.get(&container_name),
+            _ => None,
+        },
     }
 }
 

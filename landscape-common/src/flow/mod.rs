@@ -4,6 +4,7 @@ use landscape_macro::LdApiError;
 use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigId;
+use crate::proxy::ProxyMode;
 use crate::service::ServiceConfigError;
 use crate::{flow::mark::FlowMark, net::MacAddr};
 use uuid::Uuid;
@@ -135,6 +136,7 @@ fn default_prefix_len() -> u8 {
 pub enum FlowTarget {
     Interface { name: String },
     Netns { container_name: String },
+    Proxy { node_id: Uuid, mode: ProxyMode },
 }
 
 fn default_flow_target_weight() -> u32 {

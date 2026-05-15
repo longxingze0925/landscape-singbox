@@ -3,17 +3,15 @@ import type { MenuOption } from "naive-ui";
 import type { Component } from "vue";
 import { computed, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { RouterLink, useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { NIcon } from "naive-ui";
 
 import {
-  Network4,
   Settings,
   CicsSystemGroup,
   ModelBuilder,
   ChartCombo,
   ServerDns,
-  NetworkPublic,
   Devices,
   Dashboard,
   Certificate,
@@ -25,11 +23,9 @@ import { Docker } from "@vicons/fa";
 import { BookGlobe20Regular } from "@vicons/fluent";
 
 import CopyRight from "@/components/CopyRight.vue";
-import { usePtyStore } from "@/stores/pty";
 
 const route = useRoute();
 const router = useRouter();
-const ptyStore = usePtyStore();
 const { t } = useI18n();
 
 const menu_active_key = ref<string>("");
@@ -111,6 +107,11 @@ const menuOptions = computed<MenuOption[]>(() => [
   {
     label: t("routes.flow"),
     key: "flow",
+    icon: renderIcon(ModelBuilder),
+  },
+  {
+    label: t("routes.proxy"),
+    key: "proxy",
     icon: renderIcon(ModelBuilder),
   },
   {

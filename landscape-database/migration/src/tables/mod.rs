@@ -7,6 +7,7 @@ pub mod iface_ip;
 pub mod mss_clamp;
 pub mod nat;
 pub mod pppd;
+pub mod proxy;
 pub mod ra;
 pub mod wifi;
 

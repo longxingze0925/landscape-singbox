@@ -35,6 +35,8 @@ use landscape_database::{
 use reqwest::Client;
 use tokio::sync::{mpsc, Mutex};
 
+use super::GeoRefreshRuntimeStatus;
+
 const A_DAY: u64 = 60 * 60 * 24;
 
 pub type GeoDomainCacheStore = Arc<Mutex<StoreFileManager<GeoFileCacheKey, GeoDomainConfig>>>;
@@ -50,6 +52,7 @@ pub struct GeoSiteService {
     store: GeoSiteConfigRepository,
     file_cache: GeoDomainCacheStore,
     dns_events_tx: mpsc::Sender<DnsEvent>,
+    refresh_status: Arc<Mutex<HashMap<String, GeoRefreshRuntimeStatus>>>,
 }
 
 impl GeoSiteService {
@@ -64,7 +67,12 @@ impl GeoSiteService {
             "site".to_string(),
         )));
 
-        let service = Self { store, file_cache, dns_events_tx };
+        let service = Self {
+            store,
+            file_cache,
+            dns_events_tx,
+            refresh_status: Arc::new(Mutex::new(HashMap::new())),
+        };
         let service_clone = service.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(A_DAY));
@@ -417,18 +425,27 @@ impl GeoSiteService {
                                 let changed_keys =
                                     Self::diff_key_hashes(&before_hashes, &after_hashes);
                                 self.notify_geo_changes(changed_keys).await;
+                                self.record_refresh_success(&config.name).await;
                             }
-                            Err(e) => tracing::error!("read {} response error: {}", url, e),
+                            Err(e) => {
+                                let error = format!("read response error: {e}");
+                                tracing::error!("read {} response error: {}", url, e);
+                                self.record_refresh_error(&config.name, error).await;
+                            }
                         },
                         Ok(resp) => {
+                            let error = format!("HTTP status: {}", resp.status());
                             tracing::error!(
                                 "download {} error, HTTP status: {}",
                                 url,
                                 resp.status()
                             );
+                            self.record_refresh_error(&config.name, error).await;
                         }
                         Err(e) => {
+                            let error = format!("request error: {e}");
                             tracing::error!("request {} error: {}", url, e);
+                            self.record_refresh_error(&config.name, error).await;
                         }
                     }
                 }
@@ -438,6 +455,7 @@ impl GeoSiteService {
                     let after_hashes = self.snapshot_key_hashes_for_name(&config.name).await;
                     let changed_keys = Self::diff_key_hashes(&before_hashes, &after_hashes);
                     self.notify_geo_changes(changed_keys).await;
+                    self.record_refresh_success(&config.name).await;
                 }
                 GeoSiteSource::AdguardHome { url, next_update_at, key } => {
                     if !force && *next_update_at >= now {
@@ -499,18 +517,27 @@ impl GeoSiteService {
                                 let changed_keys =
                                     Self::diff_key_hashes(&before_hashes, &after_hashes);
                                 self.notify_geo_changes(changed_keys).await;
+                                self.record_refresh_success(&config.name).await;
                             }
-                            Err(e) => tracing::error!("read {} response error: {}", url, e),
+                            Err(e) => {
+                                let error = format!("read response error: {e}");
+                                tracing::error!("read {} response error: {}", url, e);
+                                self.record_refresh_error(&config.name, error).await;
+                            }
                         },
                         Ok(resp) => {
+                            let error = format!("HTTP status: {}", resp.status());
                             tracing::error!(
                                 "download {} error, HTTP status: {}",
                                 url,
                                 resp.status()
                             );
+                            self.record_refresh_error(&config.name, error).await;
                         }
                         Err(e) => {
+                            let error = format!("request error: {e}");
                             tracing::error!("request {} error: {}", url, e);
+                            self.record_refresh_error(&config.name, error).await;
                         }
                     }
                 }
@@ -576,6 +603,10 @@ impl GeoSiteService {
         lock.get(key)
     }
 
+    pub async fn get_refresh_status(&self, name: &str) -> GeoRefreshRuntimeStatus {
+        self.refresh_status.lock().await.get(name).cloned().unwrap_or_default()
+    }
+
     pub async fn query_geo_by_name(&self, name: Option<String>) -> Vec<GeoSiteSourceConfig> {
         self.store.query_by_name(name).await.unwrap()
     }
@@ -597,6 +628,18 @@ impl GeoSiteService {
         let after_hashes = self.snapshot_key_hashes_for_name(&name).await;
         let changed_keys = Self::diff_key_hashes(&before_hashes, &after_hashes);
         self.notify_geo_changes(changed_keys).await;
+    }
+
+    async fn record_refresh_success(&self, name: &str) {
+        let mut lock = self.refresh_status.lock().await;
+        let status = lock.entry(name.to_string()).or_default();
+        status.last_success_at = Some(get_f64_timestamp());
+        status.last_error = None;
+    }
+
+    async fn record_refresh_error(&self, name: &str, error: String) {
+        let mut lock = self.refresh_status.lock().await;
+        lock.entry(name.to_string()).or_default().last_error = Some(error);
     }
 }
 

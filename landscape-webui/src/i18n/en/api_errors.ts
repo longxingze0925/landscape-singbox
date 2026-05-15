@@ -12,6 +12,9 @@ export default {
   "flow_rule.duplicate_entry": "Duplicate entry match rule: {0}",
   "flow_rule.conflict_entry":
     "Entry rule '{rule}' conflicts with flow '{flow_remark}' (ID: {flow_id})",
+  "proxy.node_not_found": "Proxy node not found (ID: {0})",
+  "proxy.node_in_use":
+    "Proxy node is still used by flow '{flow_remark}' (ID: {flow_id})",
   "firewall_rule.not_found": "Firewall rule not found (ID: {0})",
   "firewall_blacklist.not_found": "Firewall blacklist not found (ID: {0})",
   "dhcp.config_not_found": "DHCP service config for '{0}' not found",

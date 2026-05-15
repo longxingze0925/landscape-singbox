@@ -7,6 +7,7 @@ use landscape_common::flow::{
     FlowEntryMatchMode, FlowEntryRule, FlowTarget, ResolvedFlowEntryMatchMode,
     ResolvedFlowEntryRule, RuntimeFlowConfig,
 };
+use landscape_common::proxy::{proxy_container_name, proxy_node_id_from_container_name};
 use migration::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 
@@ -116,14 +117,41 @@ impl FlowConfigRepository {
 
     pub async fn find_by_target(&self, t: FlowTarget) -> Result<Vec<FlowConfig>, LdError> {
         // 构造条件 SQL 和参数
-        let (condition_sql, param_value) = match t {
+        let (condition_sql, params) = match t {
             FlowTarget::Interface { name } => (
-                "json_extract(json_each.value, '$.target.t') = 'interface' AND json_extract(json_each.value, '$.target.name') = ?",
-                name,
+                "json_extract(json_each.value, '$.target.t') = 'interface' AND json_extract(json_each.value, '$.target.name') = ?".to_string(),
+                vec![sea_orm::Value::String(Some(Box::new(name)))],
             ),
-            FlowTarget::Netns { container_name } => (
-                "json_extract(json_each.value, '$.target.t') = 'netns' AND json_extract(json_each.value, '$.target.container_name') = ?",
-                container_name,
+            FlowTarget::Netns { container_name } => {
+                if let Some(node_id) = proxy_node_id_from_container_name(&container_name) {
+                    (
+                        "(
+                            (
+                                json_extract(json_each.value, '$.target.t') = 'netns'
+                                AND json_extract(json_each.value, '$.target.container_name') = ?
+                            )
+                            OR
+                            (
+                                json_extract(json_each.value, '$.target.t') = 'proxy'
+                                AND json_extract(json_each.value, '$.target.node_id') = ?
+                            )
+                        )"
+                        .to_string(),
+                        vec![
+                            sea_orm::Value::String(Some(Box::new(container_name))),
+                            sea_orm::Value::String(Some(Box::new(node_id.to_string()))),
+                        ],
+                    )
+                } else {
+                    (
+                        "json_extract(json_each.value, '$.target.t') = 'netns' AND json_extract(json_each.value, '$.target.container_name') = ?".to_string(),
+                        vec![sea_orm::Value::String(Some(Box::new(container_name)))],
+                    )
+                }
+            }
+            FlowTarget::Proxy { node_id, .. } => (
+                "json_extract(json_each.value, '$.target.t') = 'proxy' AND json_extract(json_each.value, '$.target.node_id') = ?".to_string(),
+                vec![sea_orm::Value::String(Some(Box::new(node_id.to_string())))],
             ),
         };
 
@@ -135,10 +163,7 @@ impl FlowConfigRepository {
             condition_sql
         );
 
-        let expr = Expr::cust_with_values(
-            &full_sql,
-            vec![sea_orm::Value::String(Some(Box::new(param_value)))],
-        );
+        let expr = Expr::cust_with_values(&full_sql, params);
 
         // 查询执行
         let result = FlowConfigEntity::find().filter(expr).all(&self.db).await?;
@@ -349,6 +374,15 @@ pub fn find_duplicate_resolved_modes(
     }
 
     None
+}
+
+pub fn resolve_flow_target_for_route(target: &FlowTarget) -> FlowTarget {
+    match target {
+        FlowTarget::Proxy { node_id, .. } => {
+            FlowTarget::Netns { container_name: proxy_container_name(*node_id) }
+        }
+        target => target.clone(),
+    }
 }
 
 #[cfg(test)]

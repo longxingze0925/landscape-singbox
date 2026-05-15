@@ -41,6 +41,10 @@ use landscape::{
     },
     ipv6::{ipv6pd_service::DHCPv6ClientManagerService, lan_service::LanIPv6ManagerService},
     metric::MetricService,
+    proxy::{
+        bypass_service::ProxyBypassService, node_service::ProxyNodeService,
+        runtime_service::ProxyRuntimeService,
+    },
     route::{
         lan_service::RouteLanServiceManagerService, wan_service::RouteWanServiceManagerService,
         IpRouteService,
@@ -90,6 +94,7 @@ mod interfaces;
 mod metrics;
 mod nat;
 mod openapi;
+mod proxy;
 mod redirect_https;
 mod services;
 mod system;
@@ -166,6 +171,9 @@ pub struct LandscapeApp {
 
     // Gateway
     gateway_service: GatewayService,
+    proxy_node_service: ProxyNodeService,
+    proxy_runtime_service: ProxyRuntimeService,
+    proxy_bypass_service: ProxyBypassService,
 }
 
 impl LandscapeApp {
@@ -493,6 +501,7 @@ async fn run_system(
     let dns_provider_profile_service =
         DnsProviderProfileService::new(db_store_provider.clone()).await;
     let ddns_service = DdnsService::new(db_store_provider.clone(), route_service.clone()).await;
+    let proxy_node_service = ProxyNodeService::new(db_store_provider.clone()).await;
 
     let geo_ip_service =
         GeoIpService::new(db_store_provider.clone(), dst_ip_service_tx.clone()).await;
@@ -557,6 +566,16 @@ async fn run_system(
     .await;
 
     let docker_service = LandscapeDockerService::new(home_path.clone(), route_service.clone());
+    let proxy_runtime_service =
+        ProxyRuntimeService::new(proxy_node_service.clone(), home_path.clone());
+    let proxy_bypass_service = ProxyBypassService::new(
+        flow_rule_service.clone(),
+        dns_rule_service.clone(),
+        dst_ip_rule_service.clone(),
+        dns_upstream_service.clone(),
+        geo_site_service.clone(),
+        geo_ip_service.clone(),
+    );
 
     let pppd_service =
         PPPDServiceConfigManagerService::new(db_store_provider.clone(), route_service.clone())
@@ -634,6 +653,11 @@ async fn run_system(
         "docker_service.start_to_listen_event",
         docker_service.start_to_listen_event().await
     );
+    startup_phase!("proxy_bypass_service.sync_all", {
+        if let Err(err) = proxy_bypass_service.sync_all().await {
+            tracing::warn!("failed to sync proxy bypass rules at startup: {err:?}");
+        }
+    });
 
     startup_phase!("metric_service.start_service", metric_service.start_service().await);
     let auth_share = Arc::new(ArcSwap::from_pointee(config.auth.clone()));
@@ -682,6 +706,9 @@ async fn run_system(
         cert_service: cert_service.clone(),
         // gateway
         gateway_service: gateway_service.clone(),
+        proxy_node_service,
+        proxy_runtime_service,
+        proxy_bypass_service,
     };
 
     gateway::sync_gateway_dynamic_dns_redirects(&landscape_app_status).await;
@@ -716,6 +743,7 @@ async fn run_system(
     let (docker_router, _) = openapi::build_docker_openapi_router().split_for_parts();
     let (metrics_router, _) = openapi::build_metrics_openapi_router().split_for_parts();
     let (gateway_router, _) = openapi::build_gateway_openapi_router().split_for_parts();
+    let (proxy_router, _) = openapi::build_proxy_openapi_router().split_for_parts();
     let openapi = openapi::build_full_openapi_spec();
 
     // /system combines two routers with different state types:
@@ -739,6 +767,7 @@ async fn run_system(
         .nest("/docker", docker_router)
         .nest("/metrics", metrics_router)
         .nest("/gateway", gateway_router)
+        .nest("/proxy", proxy_router)
         .with_state(landscape_app_status.clone())
         .nest("/system", system_combined)
         .route_layer(axum::middleware::from_fn_with_state(auth_share.clone(), auth::auth_handler));

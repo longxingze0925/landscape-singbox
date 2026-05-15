@@ -23,6 +23,14 @@ pub struct FlowMark {
 }
 
 impl FlowMark {
+    pub fn direct() -> Self {
+        Self {
+            action: FlowMarkAction::Direct,
+            allow_reuse_port: false,
+            flow_id: 0,
+        }
+    }
+
     pub fn need_insert_in_ebpf_map(&self) -> bool {
         match self.action {
             FlowMarkAction::KeepGoing => self.allow_reuse_port,

@@ -23,6 +23,7 @@ use crate::geo::sites::get_geo_site_config_paths;
 use crate::interfaces::get_iface_paths;
 use crate::metrics::get_metric_paths;
 use crate::nat::static_mappings::get_static_nat_mapping_config_paths;
+use crate::proxy::get_proxy_paths;
 use crate::services::client::get_client_paths;
 use crate::services::dhcp_v4::get_dhcp_v4_service_paths;
 use crate::services::firewall::get_firewall_service_paths;
@@ -104,12 +105,18 @@ impl Modify for SecurityAddon {
         (name = "Docker Networks", description = "Docker network management"),
         (name = "Metric", description = "Metric data and statistics"),
         (name = "Gateway", description = "HTTP/HTTPS reverse proxy gateway"),
+        (name = "Proxy", description = "Proxy node and policy configuration"),
     ),
     components(schemas(
         landscape_common::geo::GeoFileCacheKey,
         landscape_common::geo::QueryGeoKey,
         landscape_common::geo::GeoDomainConfig,
         landscape_common::geo::GeoIpConfig,
+        landscape_common::proxy::ProxyNodeRuntimeStatus,
+        landscape_common::proxy::ProxyRuntimeState,
+        landscape_common::proxy::ProxyBypassRuleSourceKind,
+        landscape_common::proxy::ProxyBypassRuleSourceStatus,
+        landscape_common::proxy::ProxyBypassRuleSourcesStatus,
         // Auth types
         landscape_common::auth::LoginResult,
         landscape_common::auth::ChangePasswordRequest,
@@ -216,6 +223,11 @@ pub fn build_gateway_openapi_router() -> OpenApiRouter<LandscapeApp> {
     OpenApiRouter::new().merge(get_gateway_paths())
 }
 
+/// /proxy — proxy nodes and policy configuration
+pub fn build_proxy_openapi_router() -> OpenApiRouter<LandscapeApp> {
+    OpenApiRouter::new().merge(get_proxy_paths())
+}
+
 // ── OpenAPI spec assembly ────────────────────────────────────────────
 
 /// Prepend a prefix to all OpenAPI paths in the spec.
@@ -309,6 +321,11 @@ pub fn build_full_openapi_spec() -> utoipa::openapi::OpenApi {
     prefix_paths(&mut gateway_openapi, "/api/v1/gateway");
     spec.merge(gateway_openapi);
 
+    // /api/v1/proxy
+    let (_, mut proxy_openapi) = build_proxy_openapi_router().split_for_parts();
+    prefix_paths(&mut proxy_openapi, "/api/v1/proxy");
+    spec.merge(proxy_openapi);
+
     // Add x-tagGroups for Scalar UI sidebar grouping
     let tag_groups = serde_json::json!([
         {
@@ -400,6 +417,10 @@ pub fn build_full_openapi_spec() -> utoipa::openapi::OpenApi {
         {
             "name": "Gateway",
             "tags": ["Gateway"]
+        },
+        {
+            "name": "Proxy",
+            "tags": ["Proxy"]
         }
     ]);
     spec.extensions

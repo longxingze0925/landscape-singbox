@@ -120,8 +120,10 @@ export default {
     add_target_rule: "增加一条出口规则",
     type_wan: "WAN 网卡",
     type_docker: "Docker",
+    type_proxy: "代理",
     iface_placeholder: "网卡名称",
     container_placeholder: "容器名称",
+    proxy_placeholder: "代理节点",
     weight_placeholder: "权重",
   },
   wan_rule_card: {

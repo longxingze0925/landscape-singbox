@@ -41,6 +41,7 @@ pub mod enrolled_device;
 pub mod database;
 pub mod net_proto;
 pub mod observer;
+pub mod proxy;
 pub mod pty;
 pub mod store;
 

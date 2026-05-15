@@ -19,6 +19,7 @@ use landscape_common::gateway::GatewayError;
 use landscape_common::geo::{GeoIpError, GeoSiteError};
 use landscape_common::iface::nat::StaticNatError;
 use landscape_common::ip_mark::DstIpRuleError;
+use landscape_common::proxy::ProxyError;
 use landscape_common::service::ServiceConfigError;
 
 use crate::api::LandscapeApiResp;
@@ -65,6 +66,8 @@ pub enum LandscapeApiError {
     #[error(transparent)]
     Gateway(#[from] GatewayError),
     #[error(transparent)]
+    Proxy(#[from] ProxyError),
+    #[error(transparent)]
     InitConfig(#[from] InitConfigError),
     #[error("gateway is not supported on this target architecture")]
     GatewayUnsupportedTarget,
@@ -99,6 +102,7 @@ impl LandscapeApiError {
             Self::Auth(e) => e.error_id(),
             Self::Docker(e) => e.error_id(),
             Self::Gateway(e) => e.error_id(),
+            Self::Proxy(e) => e.error_id(),
             Self::InitConfig(e) => e.error_id(),
             Self::GatewayUnsupportedTarget => "gateway.unsupported_target",
             Self::Internal(e) => match e {
@@ -130,6 +134,7 @@ impl LandscapeApiError {
             Self::Auth(e) => StatusCode::from_u16(e.http_status_code()).unwrap(),
             Self::Docker(e) => StatusCode::from_u16(e.http_status_code()).unwrap(),
             Self::Gateway(e) => StatusCode::from_u16(e.http_status_code()).unwrap(),
+            Self::Proxy(e) => StatusCode::from_u16(e.http_status_code()).unwrap(),
             Self::InitConfig(e) => StatusCode::from_u16(e.http_status_code()).unwrap(),
             Self::GatewayUnsupportedTarget => StatusCode::NOT_IMPLEMENTED,
             Self::Internal(e) => match e {
@@ -161,6 +166,7 @@ impl LandscapeApiError {
             Self::Auth(e) => e.error_args(),
             Self::Docker(e) => e.error_args(),
             Self::Gateway(e) => e.error_args(),
+            Self::Proxy(e) => e.error_args(),
             Self::InitConfig(e) => e.error_args(),
             Self::GatewayUnsupportedTarget
             | Self::Internal(_)
