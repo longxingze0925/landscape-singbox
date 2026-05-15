@@ -8,6 +8,8 @@ export default {
   protocol: "协议",
   server: "服务器",
   port: "端口",
+  runtime: "运行态",
+  container: "容器",
   method: "加密方法",
   mode_global: "全局",
   mode_bypass_china: "绕过中国大陆",

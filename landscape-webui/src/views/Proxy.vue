@@ -8,8 +8,8 @@ import {
   refresh_proxy_bypass_rule_sources,
 } from "@/api/proxy";
 import ProxyBypassRuleSourceCard from "@/components/proxy/ProxyBypassRuleSourceCard.vue";
-import ProxyNodeCard from "@/components/proxy/ProxyNodeCard.vue";
 import ProxyNodeEditModal from "@/components/proxy/ProxyNodeEditModal.vue";
+import ProxyNodeTable from "@/components/proxy/ProxyNodeTable.vue";
 import ProxyShareImportModal from "@/components/proxy/ProxyShareImportModal.vue";
 import type {
   ProxyBypassRuleSourcesStatus,
@@ -27,10 +27,6 @@ const show_edit = ref(false);
 const show_import = ref(false);
 const active_tab = ref("nodes");
 const rule_sources_loading = ref(false);
-const status_map = computed(
-  () =>
-    new Map(runtime_statuses.value.map((status) => [status.node_id, status])),
-);
 const rule_sources_ready = computed(
   () =>
     bypass_rule_sources_status.value?.domain.cache_exists &&
@@ -108,17 +104,12 @@ onMounted(refresh);
               v-if="nodes.length === 0"
               :description="t('proxy.no_nodes')"
             />
-            <n-grid v-else x-gap="12" y-gap="10" cols="1 700:2 1100:3 1500:4">
-              <n-grid-item v-for="node in nodes" :key="node.id">
-                <ProxyNodeCard
-                  :node="node"
-                  :runtime-status="
-                    node.id ? status_map.get(node.id) : undefined
-                  "
-                  @refresh="refresh"
-                />
-              </n-grid-item>
-            </n-grid>
+            <ProxyNodeTable
+              v-else
+              :nodes="nodes"
+              :runtime-statuses="runtime_statuses"
+              @refresh="refresh"
+            />
           </n-flex>
         </n-tab-pane>
         <n-tab-pane name="rule_sources" :tab="t('proxy.rule_sources_tab')">

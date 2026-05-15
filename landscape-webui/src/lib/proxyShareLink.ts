@@ -76,7 +76,7 @@ function parseVless(raw: string): ProxyNodeConfig {
     server: url.hostname,
     port: requiredPort(url.port),
     protocol,
-    remark: raw,
+    remark: "",
   });
 }
 
@@ -98,7 +98,7 @@ function parseVmess(raw: string): ProxyNodeConfig {
     server: required(payload.add, "vmess server"),
     port: requiredPort(String(payload.port ?? "")),
     protocol,
-    remark: raw,
+    remark: "",
   });
 }
 
@@ -124,7 +124,7 @@ function parseShadowsocks(raw: string): ProxyNodeConfig {
       method: required(method, "ss method"),
       password: required(password, "ss password"),
     },
-    remark: raw,
+    remark: "",
   });
 }
 
@@ -139,7 +139,7 @@ function parseSocks(raw: string): ProxyNodeConfig {
       username: optional(decodeURIComponent(url.username)),
       password: optional(decodeURIComponent(url.password)),
     },
-    remark: raw,
+    remark: "",
   });
 }
 

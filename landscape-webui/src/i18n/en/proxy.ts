@@ -8,6 +8,8 @@ export default {
   protocol: "Protocol",
   server: "Server",
   port: "Port",
+  runtime: "Runtime",
+  container: "Container",
   method: "Method",
   mode_global: "Global",
   mode_bypass_china: "Bypass China",
