@@ -21,7 +21,9 @@ const node = ref<ProxyNodeConfig>();
 const origin_json = ref("");
 const commit_spin = ref(false);
 
-const isModified = computed(() => JSON.stringify(node.value) !== origin_json.value);
+const isModified = computed(
+  () => JSON.stringify(node.value) !== origin_json.value,
+);
 const node_enabled = computed({
   get() {
     return node.value?.enable ?? false;
@@ -57,13 +59,29 @@ const ssMethodOptions = [
 function defaultProtocol(tpe = "vless"): ProxyProtocolConfig {
   switch (tpe) {
     case "vmess":
-      return { t: "vmess", uuid: "", alter_id: 0, security: "auto", tls: false };
+      return {
+        t: "vmess",
+        uuid: "",
+        alter_id: 0,
+        security: "auto",
+        tls: false,
+      };
     case "shadowsocks":
-      return { t: "shadowsocks", method: "2022-blake3-aes-128-gcm", password: "" };
+      return {
+        t: "shadowsocks",
+        method: "2022-blake3-aes-128-gcm",
+        password: "",
+      };
     case "socks5":
       return { t: "socks5", username: null, password: null };
     default:
-      return { t: "vless", uuid: "", flow: null, tls: false, server_name: null };
+      return {
+        t: "vless",
+        uuid: "",
+        flow: null,
+        tls: false,
+        server_name: null,
+      };
   }
 }
 
@@ -84,7 +102,9 @@ function onProtocolChange(value: string) {
 }
 
 async function enter() {
-  node.value = props.node_id ? await get_proxy_node(props.node_id) : defaultNode();
+  node.value = props.node_id
+    ? await get_proxy_node(props.node_id)
+    : defaultNode();
   origin_json.value = JSON.stringify(node.value);
 }
 

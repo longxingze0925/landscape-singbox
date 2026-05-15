@@ -24,8 +24,9 @@ const runtime_statuses = ref<ProxyNodeRuntimeStatus[]>([]);
 const bypass_rule_sources_status = ref<ProxyBypassRuleSourcesStatus>();
 const show_edit = ref(false);
 const rule_sources_loading = ref(false);
-const status_map = computed(() =>
-  new Map(runtime_statuses.value.map((status) => [status.node_id, status])),
+const status_map = computed(
+  () =>
+    new Map(runtime_statuses.value.map((status) => [status.node_id, status])),
 );
 
 async function refresh() {
@@ -62,7 +63,9 @@ onMounted(refresh);
       <ProxyBypassRuleSourceCard
         :status="bypass_rule_sources_status"
         :loading="rule_sources_loading"
-        @refresh-domain="runRuleSourceRefresh(refresh_proxy_bypass_domain_rule_source)"
+        @refresh-domain="
+          runRuleSourceRefresh(refresh_proxy_bypass_domain_rule_source)
+        "
         @refresh-ip="runRuleSourceRefresh(refresh_proxy_bypass_ip_rule_source)"
         @refresh-all="runRuleSourceRefresh(refresh_proxy_bypass_rule_sources)"
       />

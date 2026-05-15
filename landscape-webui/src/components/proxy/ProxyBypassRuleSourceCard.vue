@@ -28,7 +28,9 @@ const sources = computed(() => {
   ];
 });
 
-const ready = computed(() => sources.value.every(({ value }) => value.cache_exists));
+const ready = computed(() =>
+  sources.value.every(({ value }) => value.cache_exists),
+);
 const totalItems = computed(() =>
   sources.value.reduce((total, { value }) => total + value.item_count, 0),
 );
@@ -58,16 +60,29 @@ function refreshSource(source: ProxyBypassRuleSourceStatus) {
           :type="ready ? 'success' : 'warning'"
           :bordered="false"
         >
-          {{ ready ? t("proxy.rule_sources_ready") : t("proxy.rule_sources_missing") }}
+          {{
+            ready
+              ? t("proxy.rule_sources_ready")
+              : t("proxy.rule_sources_missing")
+          }}
         </n-tag>
       </n-flex>
     </template>
     <template #header-extra>
       <n-flex size="small">
         <n-button text size="small" @click="expanded = !expanded">
-          {{ expanded ? t("proxy.collapse_rule_sources") : t("proxy.expand_rule_sources") }}
+          {{
+            expanded
+              ? t("proxy.collapse_rule_sources")
+              : t("proxy.expand_rule_sources")
+          }}
         </n-button>
-        <n-button secondary size="small" :loading="loading" @click="emit('refreshAll')">
+        <n-button
+          secondary
+          size="small"
+          :loading="loading"
+          @click="emit('refreshAll')"
+        >
           {{ t("proxy.refresh_all_rules") }}
         </n-button>
       </n-flex>
@@ -107,7 +122,12 @@ function refreshSource(source: ProxyBypassRuleSourceStatus) {
               </n-button>
             </template>
 
-            <n-descriptions bordered label-placement="left" :column="1" size="small">
+            <n-descriptions
+              bordered
+              label-placement="left"
+              :column="1"
+              size="small"
+            >
               <n-descriptions-item :label="t('proxy.rule_source_key')">
                 {{ source.value.name }}/{{ source.value.key }}
               </n-descriptions-item>
