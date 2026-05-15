@@ -8,6 +8,7 @@ use crate::utils::id::gen_database_uuid;
 use crate::utils::time::get_f64_timestamp;
 
 pub const PROXY_CONTAINER_NAME_PREFIX: &str = "landscape_proxy_";
+pub const PROXY_RUNTIME_CONTAINER_NAME: &str = "landscape_proxy_runtime";
 
 #[derive(thiserror::Error, Debug, LdApiError)]
 #[api_error(crate_path = "crate")]
@@ -176,8 +177,8 @@ impl LandscapeDBStore<Uuid> for ProxyNodeConfig {
     }
 }
 
-pub fn proxy_container_name(node_id: Uuid) -> String {
-    format!("{PROXY_CONTAINER_NAME_PREFIX}{}", node_id.simple())
+pub fn proxy_container_name(_node_id: Uuid) -> String {
+    PROXY_RUNTIME_CONTAINER_NAME.to_string()
 }
 
 pub fn proxy_node_id_from_container_name(container_name: &str) -> Option<Uuid> {

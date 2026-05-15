@@ -162,6 +162,7 @@ async fn add_flow_rule(
 
     let result = state.flow_rule_service.checked_set(flow_rule).await?;
     state.proxy_bypass_service.sync_flow(&result).await?;
+    let _ = state.proxy_runtime_service.sync_runtime().await;
     LandscapeApiResp::success(result)
 }
 
@@ -184,5 +185,6 @@ async fn del_flow_rule(
     if let Some(flow_id) = flow_id {
         state.proxy_bypass_service.remove_flow(flow_id).await;
     }
+    let _ = state.proxy_runtime_service.sync_runtime().await;
     LandscapeApiResp::success(())
 }

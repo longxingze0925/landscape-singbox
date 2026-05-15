@@ -6,6 +6,9 @@ import {
   refresh_proxy_bypass_domain_rule_source,
   refresh_proxy_bypass_ip_rule_source,
   refresh_proxy_bypass_rule_sources,
+  remove_proxy_runtime,
+  stop_proxy_runtime,
+  sync_proxy_runtime,
 } from "@/api/proxy";
 import ProxyBypassRuleSourceCard from "@/components/proxy/ProxyBypassRuleSourceCard.vue";
 import ProxyNodeEditModal from "@/components/proxy/ProxyNodeEditModal.vue";
@@ -27,6 +30,7 @@ const show_edit = ref(false);
 const show_import = ref(false);
 const active_tab = ref("nodes");
 const rule_sources_loading = ref(false);
+const runtime_loading = ref(false);
 const rule_sources_ready = computed(
   () =>
     bypass_rule_sources_status.value?.domain.cache_exists &&
@@ -37,6 +41,14 @@ const total_rule_items = computed(() => {
   if (!status) return 0;
   return status.domain.item_count + status.ip.item_count;
 });
+const runtime_action_node_id = computed(
+  () =>
+    nodes.value.find((node) => node.id && node.enable)?.id ||
+    nodes.value[0]?.id,
+);
+const runtime_state = computed(
+  () => runtime_statuses.value[0]?.state || "missing",
+);
 
 async function refresh() {
   const [node_list, status_list, rule_sources_status] = await Promise.all([
@@ -57,6 +69,20 @@ async function runRuleSourceRefresh(
     bypass_rule_sources_status.value = await action();
   } finally {
     rule_sources_loading.value = false;
+  }
+}
+
+async function runRuntimeAction(
+  action: (id: string) => Promise<ProxyNodeRuntimeStatus>,
+) {
+  const node_id = runtime_action_node_id.value;
+  if (!node_id) return;
+  runtime_loading.value = true;
+  try {
+    await action(node_id);
+    await refresh();
+  } finally {
+    runtime_loading.value = false;
   }
 }
 
@@ -96,9 +122,47 @@ onMounted(refresh);
                   {{ t("proxy.import_share_links") }}
                 </n-button>
               </n-flex>
-              <n-button secondary @click="refresh">
-                {{ t("common.refresh") }}
-              </n-button>
+              <n-flex align="center">
+                <n-tag size="small" :bordered="false">
+                  {{ t("proxy.runtime") }}:
+                  {{ t(`proxy.runtime_state.${runtime_state}`) }}
+                </n-tag>
+                <n-button
+                  secondary
+                  type="primary"
+                  :disabled="!runtime_action_node_id"
+                  :loading="runtime_loading"
+                  @click="runRuntimeAction(sync_proxy_runtime)"
+                >
+                  {{ t("proxy.sync_runtime") }}
+                </n-button>
+                <n-button
+                  secondary
+                  :disabled="!runtime_action_node_id"
+                  :loading="runtime_loading"
+                  @click="runRuntimeAction(stop_proxy_runtime)"
+                >
+                  {{ t("proxy.stop_runtime") }}
+                </n-button>
+                <n-popconfirm
+                  @positive-click="runRuntimeAction(remove_proxy_runtime)"
+                >
+                  <template #trigger>
+                    <n-button
+                      secondary
+                      type="warning"
+                      :disabled="!runtime_action_node_id"
+                      :loading="runtime_loading"
+                    >
+                      {{ t("proxy.remove_runtime") }}
+                    </n-button>
+                  </template>
+                  {{ t("proxy.confirm_remove_runtime") }}
+                </n-popconfirm>
+                <n-button secondary @click="refresh">
+                  {{ t("common.refresh") }}
+                </n-button>
+              </n-flex>
             </n-flex>
             <n-empty
               v-if="nodes.length === 0"

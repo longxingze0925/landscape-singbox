@@ -13,9 +13,11 @@ use bollard::{
     Docker,
 };
 use landscape_common::{
+    flow::{config::FlowConfig, FlowTarget},
     proxy::{
         proxy_container_name, ProxyError, ProxyNodeConfig, ProxyNodeRuntimeStatus,
-        ProxyProtocolConfig, ProxyRuntimeState,
+        ProxyProtocolConfig, ProxyRuntimeState, PROXY_CONTAINER_NAME_PREFIX,
+        PROXY_RUNTIME_CONTAINER_NAME,
     },
     NAMESPACE_REGISTER_SOCK_PATH, NAMESPACE_REGISTER_SOCK_PATH_IN_DOCKER,
 };
@@ -23,26 +25,32 @@ use serde_json::{json, Map, Value};
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
-use crate::proxy::node_service::ProxyNodeService;
+use crate::{flow::rule_service::FlowRuleService, proxy::node_service::ProxyNodeService};
 use landscape_common::service::controller::ConfigController;
 
 const DEFAULT_PROXY_IMAGE: &str = "ghcr.io/longxingze0925/landscape-singbox:latest";
-const PROXY_TPROXY_PORT: u16 = 12345;
+const FLOW_TPROXY_PORT_BASE: u32 = 12000;
+const DEFAULT_FLOW_TPROXY_PORT: u16 = FLOW_TPROXY_PORT_BASE as u16;
 
 #[derive(Clone)]
 pub struct ProxyRuntimeService {
     node_service: ProxyNodeService,
+    flow_rule_service: FlowRuleService,
     home_path: PathBuf,
     image: String,
 }
 
 impl ProxyRuntimeService {
-    pub fn new(node_service: ProxyNodeService, home_path: PathBuf) -> Self {
+    pub fn new(
+        node_service: ProxyNodeService,
+        flow_rule_service: FlowRuleService,
+        home_path: PathBuf,
+    ) -> Self {
         let image = std::env::var("LANDSCAPE_PROXY_IMAGE")
             .ok()
             .filter(|image| !image.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_PROXY_IMAGE.to_string());
-        Self { node_service, home_path, image }
+        Self { node_service, flow_rule_service, home_path, image }
     }
 
     pub async fn list_status(&self) -> Result<Vec<ProxyNodeRuntimeStatus>, ProxyError> {
@@ -65,19 +73,18 @@ impl ProxyRuntimeService {
             self.node_service.find_by_id(node_id).await.ok_or(ProxyError::NodeNotFound(node_id))?;
 
         if !node.enable {
-            self.stop_node(node_id).await?;
+            self.sync_all_nodes().await?;
             return Err(ProxyError::NodeDisabled(node_id));
         }
 
-        self.write_config(&node).await?;
-        self.recreate_container(&node).await?;
+        self.sync_all_nodes().await?;
         self.status_for_node(&node).await
     }
 
     pub async fn stop_node(&self, node_id: Uuid) -> Result<ProxyNodeRuntimeStatus, ProxyError> {
         let node =
             self.node_service.find_by_id(node_id).await.ok_or(ProxyError::NodeNotFound(node_id))?;
-        let container_name = proxy_container_name(node.id);
+        let container_name = PROXY_RUNTIME_CONTAINER_NAME;
 
         let docker = docker()?;
         match docker.stop_container(&container_name, None::<StopContainerOptions>).await {
@@ -96,12 +103,16 @@ impl ProxyRuntimeService {
     ) -> Result<ProxyNodeRuntimeStatus, ProxyError> {
         let node =
             self.node_service.find_by_id(node_id).await.ok_or(ProxyError::NodeNotFound(node_id))?;
-        let container_name = proxy_container_name(node.id);
+        let container_name = PROXY_RUNTIME_CONTAINER_NAME;
 
         let docker = docker()?;
         remove_container_if_exists(&docker, &container_name).await?;
 
         self.status_for_node(&node).await
+    }
+
+    pub async fn sync_runtime(&self) -> Result<(), ProxyError> {
+        self.sync_all_nodes().await
     }
 
     async fn status_for_node(
@@ -154,18 +165,33 @@ impl ProxyRuntimeService {
         })
     }
 
-    async fn recreate_container(&self, node: &ProxyNodeConfig) -> Result<(), ProxyError> {
-        let container_name = proxy_container_name(node.id);
+    async fn sync_all_nodes(&self) -> Result<(), ProxyError> {
+        let nodes: Vec<ProxyNodeConfig> =
+            self.node_service.list().await.into_iter().filter(|node| node.enable).collect();
+        if nodes.is_empty() {
+            self.remove_runtime_container_and_legacy_containers().await?;
+            return Ok(());
+        }
+
+        let flows = self.flow_rule_service.list().await;
+        self.write_config(&nodes, &flows).await?;
+        self.recreate_container().await?;
+        Ok(())
+    }
+
+    async fn recreate_container(&self) -> Result<(), ProxyError> {
+        let container_name = PROXY_RUNTIME_CONTAINER_NAME;
         let docker = docker()?;
 
         ensure_image_available(&docker, &self.image).await?;
-        remove_container_if_exists(&docker, &container_name).await?;
+        self.remove_legacy_node_containers(&docker).await?;
+        remove_container_if_exists(&docker, container_name).await?;
 
-        let container_config = self.container_config(node)?;
+        let container_config = self.container_config()?;
         docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name: Some(container_name.clone()),
+                    name: Some(container_name.to_string()),
                     platform: String::new(),
                 }),
                 container_config,
@@ -181,8 +207,8 @@ impl ProxyRuntimeService {
         Ok(())
     }
 
-    fn container_config(&self, node: &ProxyNodeConfig) -> Result<ContainerCreateBody, ProxyError> {
-        let config_path = self.config_path(node.id);
+    fn container_config(&self) -> Result<ContainerCreateBody, ProxyError> {
+        let config_path = self.config_path();
         let config_bind = config_path
             .to_str()
             .ok_or_else(|| ProxyError::RuntimeConfigError("invalid proxy config path".into()))?
@@ -198,8 +224,8 @@ impl ProxyRuntimeService {
             env: Some(vec![
                 "LAND_PROXY_SERVER_ADDR=0.0.0.0".to_string(),
                 "LAND_PROXY_SERVER_ADDR_V6=::".to_string(),
-                format!("LAND_PROXY_SERVER_PORT={PROXY_TPROXY_PORT}"),
-                "LAND_PROXY_HANDLE_MODE=tproxy".to_string(),
+                format!("LAND_PROXY_SERVER_PORT={DEFAULT_FLOW_TPROXY_PORT}"),
+                "LAND_PROXY_HANDLE_MODE=multiple_tproxy".to_string(),
             ]),
             labels: Some(std::collections::HashMap::from([(
                 "ld_flow_edge".to_string(),
@@ -241,15 +267,19 @@ impl ProxyRuntimeService {
         })
     }
 
-    async fn write_config(&self, node: &ProxyNodeConfig) -> Result<(), ProxyError> {
+    async fn write_config(
+        &self,
+        nodes: &[ProxyNodeConfig],
+        flows: &[FlowConfig],
+    ) -> Result<(), ProxyError> {
         let dir = self.config_dir();
         tokio::fs::create_dir_all(&dir)
             .await
             .map_err(|err| ProxyError::RuntimeConfigError(err.to_string()))?;
-        let config = build_sing_box_config(node)?;
+        let config = build_sing_box_config(nodes, flows)?;
         let bytes = serde_json::to_vec_pretty(&config)
             .map_err(|err| ProxyError::RuntimeConfigError(err.to_string()))?;
-        tokio::fs::write(self.config_path(node.id), bytes)
+        tokio::fs::write(self.config_path(), bytes)
             .await
             .map_err(|err| ProxyError::RuntimeConfigError(err.to_string()))?;
         Ok(())
@@ -259,8 +289,25 @@ impl ProxyRuntimeService {
         self.home_path.join("proxy")
     }
 
-    fn config_path(&self, node_id: Uuid) -> PathBuf {
-        self.config_dir().join(format!("{}.json", node_id.simple()))
+    fn config_path(&self) -> PathBuf {
+        self.config_dir().join("runtime.json")
+    }
+
+    async fn remove_runtime_container_and_legacy_containers(&self) -> Result<(), ProxyError> {
+        let docker = docker()?;
+        self.remove_legacy_node_containers(&docker).await?;
+        remove_container_if_exists(&docker, PROXY_RUNTIME_CONTAINER_NAME).await?;
+        Ok(())
+    }
+
+    async fn remove_legacy_node_containers(&self, docker: &Docker) -> Result<(), ProxyError> {
+        for node in self.node_service.list().await {
+            let legacy_name = format!("{PROXY_CONTAINER_NAME_PREFIX}{}", node.id.simple());
+            if legacy_name != PROXY_RUNTIME_CONTAINER_NAME {
+                remove_container_if_exists(docker, &legacy_name).await?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -340,37 +387,128 @@ async fn remove_container_if_exists(
     }
 }
 
-fn build_sing_box_config(node: &ProxyNodeConfig) -> Result<Value, ProxyError> {
-    let outbound = build_outbound(node)?;
+fn build_sing_box_config(
+    nodes: &[ProxyNodeConfig],
+    flows: &[FlowConfig],
+) -> Result<Value, ProxyError> {
+    let mut outbounds = Vec::with_capacity(nodes.len() + 2);
+    let mut proxy_tags = Vec::with_capacity(nodes.len());
+    let node_tags: std::collections::HashMap<Uuid, String> =
+        nodes.iter().map(|node| (node.id, node_outbound_tag(node.id))).collect();
+
+    for node in nodes {
+        let tag = node_outbound_tag(node.id);
+        proxy_tags.push(tag.clone());
+        outbounds.push(build_outbound(node, &tag)?);
+    }
+
+    outbounds.push(json!({
+        "type": "selector",
+        "tag": "proxy",
+        "outbounds": proxy_tags,
+        "default": node_outbound_tag(nodes[0].id)
+    }));
+    outbounds.push(json!({
+        "type": "direct",
+        "tag": "direct"
+    }));
+
+    let mut inbounds = vec![json!({
+        "type": "tproxy",
+        "tag": "landscape-in",
+        "listen": "::",
+        "listen_port": DEFAULT_FLOW_TPROXY_PORT
+    })];
+    let mut route_rules = Vec::new();
+    for flow in flows.iter().filter(|flow| flow.enable) {
+        let flow_proxy_tags = proxy_tags_for_flow(flow, &node_tags);
+        if flow_proxy_tags.is_empty() {
+            continue;
+        }
+
+        let inbound_tag = flow_inbound_tag(flow.flow_id);
+        let listen_port = flow_tproxy_port(flow.flow_id)?;
+        inbounds.push(json!({
+            "type": "tproxy",
+            "tag": inbound_tag,
+            "listen": "::",
+            "listen_port": listen_port
+        }));
+
+        let outbound = if flow_proxy_tags.len() == 1 {
+            flow_proxy_tags[0].clone()
+        } else {
+            let selector_tag = flow_selector_tag(flow.flow_id);
+            outbounds.push(json!({
+                "type": "selector",
+                "tag": selector_tag,
+                "outbounds": flow_proxy_tags,
+                "default": flow_proxy_tags[0]
+            }));
+            selector_tag
+        };
+        route_rules.push(json!({
+            "inbound": [inbound_tag],
+            "outbound": outbound
+        }));
+    }
+
     Ok(json!({
         "log": {
             "level": "info",
             "timestamp": true
         },
-        "inbounds": [
-            {
-                "type": "tproxy",
-                "tag": "landscape-in",
-                "listen": "::",
-                "listen_port": PROXY_TPROXY_PORT
-            }
-        ],
-        "outbounds": [
-            outbound,
-            {
-                "type": "direct",
-                "tag": "direct"
-            }
-        ],
+        "inbounds": inbounds,
+        "outbounds": outbounds,
         "route": {
+            "rules": route_rules,
             "final": "proxy"
         }
     }))
 }
 
-fn build_outbound(node: &ProxyNodeConfig) -> Result<Value, ProxyError> {
+fn flow_tproxy_port(flow_id: u32) -> Result<u16, ProxyError> {
+    if flow_id > u8::MAX as u32 {
+        return Err(ProxyError::RuntimeConfigError(format!(
+            "flow id {flow_id} is too large for proxy tproxy routing"
+        )));
+    }
+
+    let port = FLOW_TPROXY_PORT_BASE + flow_id;
+    u16::try_from(port).map_err(|_| {
+        ProxyError::RuntimeConfigError(format!("flow id {flow_id} maps to invalid proxy port"))
+    })
+}
+
+fn flow_inbound_tag(flow_id: u32) -> String {
+    format!("flow-{flow_id}")
+}
+
+fn flow_selector_tag(flow_id: u32) -> String {
+    format!("flow-proxy-{flow_id}")
+}
+
+fn node_outbound_tag(node_id: Uuid) -> String {
+    format!("proxy-{}", node_id.simple())
+}
+
+fn proxy_tags_for_flow(
+    flow: &FlowConfig,
+    node_tags: &std::collections::HashMap<Uuid, String>,
+) -> Vec<String> {
+    flow.flow_targets
+        .iter()
+        .filter(|target| target.weight > 0)
+        .filter_map(|target| match target.target {
+            FlowTarget::Proxy { node_id, .. } => node_tags.get(&node_id).cloned(),
+            _ => None,
+        })
+        .collect()
+}
+
+fn build_outbound(node: &ProxyNodeConfig, tag: &str) -> Result<Value, ProxyError> {
     let mut base = Map::from_iter([
-        ("tag".to_string(), json!("proxy")),
+        ("tag".to_string(), json!(tag)),
         ("server".to_string(), json!(node.server)),
         ("server_port".to_string(), json!(node.port)),
     ]);
@@ -469,4 +607,54 @@ fn tls_config(
         );
     }
     Value::Object(tls)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use landscape_common::{flow::WeightedFlowTarget, proxy::ProxyMode};
+
+    #[test]
+    fn sing_box_config_routes_flow_inbound_to_selected_proxy_node() {
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let nodes = vec![proxy_node(first_id, "first"), proxy_node(second_id, "second")];
+        let flows = vec![FlowConfig {
+            id: Uuid::new_v4(),
+            enable: true,
+            flow_id: 7,
+            flow_match_rules: vec![],
+            flow_targets: vec![WeightedFlowTarget::new(
+                FlowTarget::Proxy { node_id: second_id, mode: ProxyMode::Global },
+                1,
+            )],
+            remark: String::new(),
+            update_at: 0.0,
+        }];
+
+        let config = build_sing_box_config(&nodes, &flows).expect("build sing-box config");
+
+        let inbounds = config["inbounds"].as_array().expect("inbounds");
+        assert!(inbounds.iter().any(|inbound| {
+            inbound["tag"] == "flow-7" && inbound["listen_port"] == FLOW_TPROXY_PORT_BASE + 7
+        }));
+
+        let route_rules = config["route"]["rules"].as_array().expect("route rules");
+        assert!(route_rules.iter().any(|rule| {
+            rule["inbound"] == json!(["flow-7"]) && rule["outbound"] == node_outbound_tag(second_id)
+        }));
+    }
+
+    fn proxy_node(id: Uuid, name: &str) -> ProxyNodeConfig {
+        ProxyNodeConfig {
+            id,
+            name: name.to_string(),
+            enable: true,
+            server: "127.0.0.1".to_string(),
+            port: 1080,
+            protocol: ProxyProtocolConfig::Socks5 { username: None, password: None },
+            remark: String::new(),
+            update_at: 0.0,
+        }
+    }
 }

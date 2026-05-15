@@ -1,10 +1,5 @@
 <script setup lang="ts">
-import {
-  delete_proxy_node,
-  remove_proxy_runtime,
-  stop_proxy_runtime,
-  sync_proxy_runtime,
-} from "@/api/proxy";
+import { delete_proxy_node } from "@/api/proxy";
 import ProxyNodeEditModal from "@/components/proxy/ProxyNodeEditModal.vue";
 import { useFrontEndStore } from "@/stores/front_end_config";
 import type {
@@ -31,7 +26,6 @@ const { t } = useI18n();
 const frontEndStore = useFrontEndStore();
 const show_edit = ref(false);
 const editing_node_id = ref<string>();
-const loading_node_id = ref<string>();
 
 const status_map = computed(
   () =>
@@ -152,7 +146,7 @@ const columns = computed<DataTableColumns<ProxyNodeRow>>(() => [
   {
     title: t("common.actions"),
     key: "actions",
-    width: 360,
+    width: 130,
     fixed: "right",
     render(row) {
       return h(
@@ -168,36 +162,6 @@ const columns = computed<DataTableColumns<ProxyNodeRow>>(() => [
                 onClick: () => edit(row.node),
               },
               { default: () => t("common.edit") },
-            ),
-            actionButton(
-              row,
-              sync_proxy_runtime,
-              t("proxy.sync_runtime"),
-              "primary",
-              !row.node.enable,
-            ),
-            actionButton(row, stop_proxy_runtime, t("proxy.stop_runtime")),
-            h(
-              NPopconfirm,
-              {
-                onPositiveClick: () =>
-                  runRuntimeAction(row, remove_proxy_runtime),
-              },
-              {
-                trigger: () =>
-                  h(
-                    NButton,
-                    {
-                      secondary: true,
-                      size: "tiny",
-                      type: "warning",
-                      loading: loading_node_id.value === row.node.id,
-                      disabled: !row.node.id,
-                    },
-                    { default: () => t("proxy.remove_runtime") },
-                  ),
-                default: () => t("proxy.confirm_remove_runtime"),
-              },
             ),
             h(
               NPopconfirm,
@@ -264,41 +228,6 @@ async function del(node: ProxyNodeConfig) {
   if (!node.id) return;
   await delete_proxy_node(node.id);
   emit("refresh");
-}
-
-function actionButton(
-  row: ProxyNodeRow,
-  action: (id: string) => Promise<ProxyNodeRuntimeStatus>,
-  label: string,
-  type?: "primary" | "warning" | "error",
-  disabled = false,
-) {
-  return h(
-    NButton,
-    {
-      secondary: true,
-      size: "tiny",
-      type,
-      loading: loading_node_id.value === row.node.id,
-      disabled: disabled || !row.node.id,
-      onClick: () => runRuntimeAction(row, action),
-    },
-    { default: () => label },
-  );
-}
-
-async function runRuntimeAction(
-  row: ProxyNodeRow,
-  action: (id: string) => Promise<ProxyNodeRuntimeStatus>,
-) {
-  if (!row.node.id) return;
-  loading_node_id.value = row.node.id;
-  try {
-    await action(row.node.id);
-    emit("refresh");
-  } finally {
-    loading_node_id.value = undefined;
-  }
 }
 </script>
 

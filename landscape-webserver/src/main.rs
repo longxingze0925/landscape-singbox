@@ -566,8 +566,11 @@ async fn run_system(
     .await;
 
     let docker_service = LandscapeDockerService::new(home_path.clone(), route_service.clone());
-    let proxy_runtime_service =
-        ProxyRuntimeService::new(proxy_node_service.clone(), home_path.clone());
+    let proxy_runtime_service = ProxyRuntimeService::new(
+        proxy_node_service.clone(),
+        flow_rule_service.clone(),
+        home_path.clone(),
+    );
     let proxy_bypass_service = ProxyBypassService::new(
         flow_rule_service.clone(),
         dns_rule_service.clone(),

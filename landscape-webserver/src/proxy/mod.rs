@@ -109,8 +109,8 @@ async fn del_proxy_node(
         })?;
     }
 
-    let _ = state.proxy_runtime_service.remove_node_container(id).await;
     state.proxy_node_service.delete(id).await;
+    let _ = state.proxy_runtime_service.sync_runtime().await;
     LandscapeApiResp::success(())
 }
 
