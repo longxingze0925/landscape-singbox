@@ -376,14 +376,32 @@ fn build_outbound(node: &ProxyNodeConfig) -> Result<Value, ProxyError> {
     ]);
 
     match &node.protocol {
-        ProxyProtocolConfig::Vless { uuid, flow, tls, server_name } => {
+        ProxyProtocolConfig::Vless {
+            uuid,
+            flow,
+            tls,
+            server_name,
+            reality,
+            reality_public_key,
+            reality_short_id,
+            utls_fingerprint,
+        } => {
             base.insert("type".to_string(), json!("vless"));
             base.insert("uuid".to_string(), json!(uuid));
             if let Some(flow) = non_empty_opt(flow) {
                 base.insert("flow".to_string(), json!(flow));
             }
-            if *tls {
-                base.insert("tls".to_string(), tls_config(server_name));
+            if *tls || *reality {
+                base.insert(
+                    "tls".to_string(),
+                    tls_config(
+                        server_name,
+                        *reality,
+                        reality_public_key,
+                        reality_short_id,
+                        utls_fingerprint,
+                    ),
+                );
             }
         }
         ProxyProtocolConfig::Vmess { uuid, alter_id, security, tls, server_name } => {
@@ -394,7 +412,7 @@ fn build_outbound(node: &ProxyNodeConfig) -> Result<Value, ProxyError> {
                 base.insert("security".to_string(), json!(security));
             }
             if *tls {
-                base.insert("tls".to_string(), tls_config(server_name));
+                base.insert("tls".to_string(), tls_config(server_name, false, &None, &None, &None));
             }
         }
         ProxyProtocolConfig::Shadowsocks { method, password } => {
@@ -420,10 +438,35 @@ fn non_empty_opt(value: &Option<String>) -> Option<&str> {
     value.as_deref().map(str::trim).filter(|value| !value.is_empty())
 }
 
-fn tls_config(server_name: &Option<String>) -> Value {
+fn tls_config(
+    server_name: &Option<String>,
+    reality: bool,
+    reality_public_key: &Option<String>,
+    reality_short_id: &Option<String>,
+    utls_fingerprint: &Option<String>,
+) -> Value {
     let mut tls = Map::from_iter([("enabled".to_string(), json!(true))]);
     if let Some(server_name) = non_empty_opt(server_name) {
         tls.insert("server_name".to_string(), json!(server_name));
+    }
+    if reality {
+        let mut reality_config = Map::from_iter([("enabled".to_string(), json!(true))]);
+        if let Some(public_key) = non_empty_opt(reality_public_key) {
+            reality_config.insert("public_key".to_string(), json!(public_key));
+        }
+        if let Some(short_id) = non_empty_opt(reality_short_id) {
+            reality_config.insert("short_id".to_string(), json!(short_id));
+        }
+        tls.insert("reality".to_string(), Value::Object(reality_config));
+    }
+    if let Some(fingerprint) = non_empty_opt(utls_fingerprint) {
+        tls.insert(
+            "utls".to_string(),
+            json!({
+                "enabled": true,
+                "fingerprint": fingerprint,
+            }),
+        );
     }
     Value::Object(tls)
 }

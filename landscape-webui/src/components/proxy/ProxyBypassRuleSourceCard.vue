@@ -9,6 +9,8 @@ import { useI18n } from "vue-i18n";
 const props = defineProps<{
   status?: ProxyBypassRuleSourcesStatus;
   loading?: boolean;
+  defaultExpanded?: boolean;
+  hideToggle?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -18,7 +20,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const expanded = ref(false);
+const expanded = ref(props.defaultExpanded ?? false);
 
 const sources = computed(() => {
   if (!props.status) return [];
@@ -37,7 +39,8 @@ const totalItems = computed(() =>
 
 function formatTime(ts?: number | null): string {
   if (!ts) return "-";
-  return new Date(ts * 1000).toLocaleString();
+  const timestamp = ts < 10_000_000_000 ? ts * 1000 : ts;
+  return new Date(timestamp).toLocaleString();
 }
 
 function refreshSource(source: ProxyBypassRuleSourceStatus) {
@@ -70,7 +73,12 @@ function refreshSource(source: ProxyBypassRuleSourceStatus) {
     </template>
     <template #header-extra>
       <n-flex size="small">
-        <n-button text size="small" @click="expanded = !expanded">
+        <n-button
+          v-if="!hideToggle"
+          text
+          size="small"
+          @click="expanded = !expanded"
+        >
           {{
             expanded
               ? t("proxy.collapse_rule_sources")

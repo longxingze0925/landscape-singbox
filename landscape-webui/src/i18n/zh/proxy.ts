@@ -1,6 +1,9 @@
 export default {
   title: "代理节点",
+  nodes_tab: "代理节点",
+  rule_sources_tab: "绕过规则源",
   create_node: "新增代理节点",
+  import_share_links: "导入分享链接",
   edit_title: "代理节点编辑",
   protocol: "协议",
   server: "服务器",
@@ -19,6 +22,7 @@ export default {
   rule_sources_missing_tip:
     "绕过中国大陆需要域名规则和 IP 规则同时下载成功。缓存缺失时可手动刷新规则源。",
   total_rule_items: "总规则 {count} 条",
+  rule_sources_summary: "绕过规则源：{status} · 总规则 {count} 条",
   refresh_all_rules: "刷新全部规则",
   refresh_this_rule_source: "刷新此规则",
   expand_rule_sources: "查看详情",
@@ -35,6 +39,14 @@ export default {
   stop_runtime: "停止",
   remove_runtime: "删除容器",
   confirm_remove_runtime: "确认删除该代理运行容器？节点配置会保留。",
+  share_link_placeholder:
+    "粘贴节点分享链接，一行一个。支持 vless://、vmess://、ss://、socks://、socks5://",
+  share_link_supported: "支持 VLESS Reality、VMess、Shadowsocks、SOCKS5。",
+  parse_share_links: "解析链接",
+  import_features: "特性",
+  import_status: "状态",
+  import_ready: "可导入",
+  import_selected_nodes: "导入选中 {count} 个",
   runtime_state: {
     missing: "未创建",
     created: "已创建",

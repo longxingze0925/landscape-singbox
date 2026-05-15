@@ -1,6 +1,9 @@
 export default {
   title: "Proxy Nodes",
+  nodes_tab: "Proxy nodes",
+  rule_sources_tab: "Bypass rule sources",
   create_node: "Create proxy node",
+  import_share_links: "Import share links",
   edit_title: "Proxy Node Editor",
   protocol: "Protocol",
   server: "Server",
@@ -19,6 +22,7 @@ export default {
   rule_sources_missing_tip:
     "Bypass China requires both domain and IP rules. If a cache is missing, refresh the rule sources manually.",
   total_rule_items: "{count} rules total",
+  rule_sources_summary: "Bypass rule sources: {status} · {count} rules total",
   refresh_all_rules: "Refresh all rules",
   refresh_this_rule_source: "Refresh this source",
   expand_rule_sources: "Show details",
@@ -36,6 +40,15 @@ export default {
   remove_runtime: "Remove container",
   confirm_remove_runtime:
     "Remove this proxy runtime container? The node config will be kept.",
+  share_link_placeholder:
+    "Paste proxy share links, one per line. Supports vless://, vmess://, ss://, socks://, socks5://",
+  share_link_supported:
+    "Supports VLESS Reality, VMess, Shadowsocks, and SOCKS5.",
+  parse_share_links: "Parse links",
+  import_features: "Features",
+  import_status: "Status",
+  import_ready: "Ready",
+  import_selected_nodes: "Import selected {count}",
   runtime_state: {
     missing: "Missing",
     created: "Created",

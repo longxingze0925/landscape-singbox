@@ -81,6 +81,10 @@ function defaultProtocol(tpe = "vless"): ProxyProtocolConfig {
         flow: null,
         tls: false,
         server_name: null,
+        reality: false,
+        reality_public_key: null,
+        reality_short_id: null,
+        utls_fingerprint: null,
       };
   }
 }
@@ -169,6 +173,21 @@ async function saveNode() {
           <n-form-item-gi label="TLS">
             <n-switch v-model:value="node.protocol.tls" />
           </n-form-item-gi>
+          <n-form-item-gi label="Reality">
+            <n-switch
+              v-model:value="node.protocol.reality"
+              @update:value="node.protocol.tls = node.protocol.tls || $event"
+            />
+          </n-form-item-gi>
+          <n-form-item-gi label="uTLS">
+            <n-input
+              v-model:value="node.protocol.utls_fingerprint"
+              placeholder="chrome"
+              clearable
+            />
+          </n-form-item-gi>
+        </n-grid>
+        <n-grid :cols="3" :x-gap="12">
           <n-form-item-gi label="SNI">
             <n-input v-model:value="node.protocol.server_name" clearable />
           </n-form-item-gi>
@@ -179,7 +198,16 @@ async function saveNode() {
               clearable
             />
           </n-form-item-gi>
+          <n-form-item-gi label="Reality Public Key">
+            <n-input
+              v-model:value="node.protocol.reality_public_key"
+              clearable
+            />
+          </n-form-item-gi>
         </n-grid>
+        <n-form-item label="Reality Short ID">
+          <n-input v-model:value="node.protocol.reality_short_id" clearable />
+        </n-form-item>
       </template>
 
       <template v-else-if="node.protocol.t === 'vmess'">

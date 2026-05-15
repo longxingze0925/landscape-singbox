@@ -58,6 +58,14 @@ pub enum ProxyProtocolConfig {
         tls: bool,
         #[serde(default)]
         server_name: Option<String>,
+        #[serde(default)]
+        reality: bool,
+        #[serde(default)]
+        reality_public_key: Option<String>,
+        #[serde(default)]
+        reality_short_id: Option<String>,
+        #[serde(default)]
+        utls_fingerprint: Option<String>,
     },
     Vmess {
         uuid: String,
