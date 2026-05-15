@@ -25,3 +25,5 @@ libduckdb/
 # Node
 node_modules/
 landscape-types/.bindings.lock
+build-context/
+*.log

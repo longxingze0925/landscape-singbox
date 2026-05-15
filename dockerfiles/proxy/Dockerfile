@@ -7,7 +7,15 @@ ARG SING_BOX_VERSION=1.12.22
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gzip iproute2 tar \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gzip \
+        iproute2 \
+        libelf1 \
+        libgcc-s1 \
+        tar \
+        zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
