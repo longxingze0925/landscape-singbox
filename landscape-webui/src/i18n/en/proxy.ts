@@ -62,6 +62,13 @@ export default {
   import_status: "Status",
   import_ready: "Ready",
   import_selected_nodes: "Import selected {count}",
+  import_success: "Imported {count} nodes",
+  import_partial_failed_title: "Some imports failed",
+  import_partial_failed: "Succeeded {success}, failed {failed}",
+  load_nodes_failed: "Failed to load nodes",
+  load_runtime_failed: "Failed to load runtime status",
+  load_rule_sources_failed: "Failed to load rule source status",
+  rule_sources_refresh_success: "Rule sources refreshed",
   runtime_state: {
     missing: "Missing",
     created: "Created",

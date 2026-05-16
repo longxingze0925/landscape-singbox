@@ -60,6 +60,13 @@ export default {
   import_status: "状态",
   import_ready: "可导入",
   import_selected_nodes: "导入选中 {count} 个",
+  import_success: "已导入 {count} 个节点",
+  import_partial_failed_title: "部分节点导入失败",
+  import_partial_failed: "成功 {success} 个，失败 {failed} 个",
+  load_nodes_failed: "节点列表加载失败",
+  load_runtime_failed: "运行态加载失败",
+  load_rule_sources_failed: "规则源状态加载失败",
+  rule_sources_refresh_success: "规则源已刷新",
   runtime_state: {
     missing: "未创建",
     created: "已创建",

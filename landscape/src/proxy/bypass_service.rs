@@ -28,7 +28,8 @@ use crate::{
 
 const GEO_SOURCE_NAME: &str = "proxy-default";
 const GEO_CN_KEY: &str = "CN";
-const GEO_SITE_SOURCE_URL: &str = "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat";
+const GEO_SITE_SOURCE_URL: &str =
+    "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat";
 const GEO_IP_SOURCE_URL: &str = "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat";
 const AUTO_DNS_RULE_PREFIX: &str = "__landscape_proxy_bypass_china_dns__";
 const AUTO_DST_IP_RULE_PREFIX: &str = "__landscape_proxy_bypass_china_ip__";

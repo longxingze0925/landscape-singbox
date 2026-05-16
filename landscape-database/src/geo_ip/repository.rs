@@ -21,11 +21,12 @@ impl GeoIpSourceConfigRepository {
         &self,
         name: Option<String>,
     ) -> Result<Vec<GeoIpSourceConfig>, LdError> {
-        let result = GeoIpSourceConfigEntity::find()
-            .filter(Column::Name.contains(name.unwrap_or("".to_string())))
-            .order_by_desc(Column::UpdateAt)
-            .all(&self.db)
-            .await?;
+        let mut query = GeoIpSourceConfigEntity::find();
+        if let Some(name) = name {
+            query = query.filter(Column::Name.eq(name));
+        }
+
+        let result = query.order_by_desc(Column::UpdateAt).all(&self.db).await?;
         Ok(result.into_iter().map(From::from).collect())
     }
 }

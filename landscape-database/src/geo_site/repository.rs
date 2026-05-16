@@ -19,11 +19,12 @@ impl GeoSiteConfigRepository {
         &self,
         name: Option<String>,
     ) -> Result<Vec<GeoSiteSourceConfig>, LdError> {
-        let result = GeoSiteConfigEntity::find()
-            .filter(Column::Name.contains(name.unwrap_or("".to_string())))
-            .order_by_desc(Column::UpdateAt)
-            .all(&self.db)
-            .await?;
+        let mut query = GeoSiteConfigEntity::find();
+        if let Some(name) = name {
+            query = query.filter(Column::Name.eq(name));
+        }
+
+        let result = query.order_by_desc(Column::UpdateAt).all(&self.db).await?;
         Ok(result.into_iter().map(From::from).collect())
     }
 }

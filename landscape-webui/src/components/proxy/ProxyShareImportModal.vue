@@ -6,10 +6,12 @@ import {
 } from "@/lib/proxyShareLink";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useMessage } from "naive-ui";
 
 const emit = defineEmits(["refresh"]);
 const show = defineModel<boolean>("show", { required: true });
 const { t } = useI18n();
+const message = useMessage();
 
 type ImportRow = {
   index: number;
@@ -26,6 +28,7 @@ const input = ref("");
 const parsed = ref<ParsedProxyShareLink[]>([]);
 const checked = ref<number[]>([]);
 const importing = ref(false);
+const import_errors = ref<string[]>([]);
 
 const importableIndexes = computed(() =>
   parsed.value
@@ -56,6 +59,7 @@ function reset() {
   parsed.value = [];
   checked.value = [];
   importing.value = false;
+  import_errors.value = [];
 }
 
 function protocolLabel(item: ParsedProxyShareLink) {
@@ -83,13 +87,36 @@ function featureLabel(item: ParsedProxyShareLink) {
 
 async function importSelected() {
   importing.value = true;
+  import_errors.value = [];
   try {
+    let success_count = 0;
     for (const index of checked.value) {
       const node = parsed.value[index]?.node;
-      if (node) await push_proxy_node(node);
+      if (!node) continue;
+      try {
+        await push_proxy_node(node);
+        success_count += 1;
+      } catch (error) {
+        const text =
+          error instanceof Error ? error.message : String(error);
+        import_errors.value.push(
+          `${node.name || node.server}: ${text}`,
+        );
+      }
     }
-    show.value = false;
-    emit("refresh");
+    if (success_count > 0) {
+      emit("refresh");
+    }
+    if (import_errors.value.length === 0) {
+      message.success(t("proxy.import_success", { count: success_count }));
+      show.value = false;
+      return;
+    }
+
+    message.error(t("proxy.import_partial_failed", {
+      success: success_count,
+      failed: import_errors.value.length,
+    }));
   } finally {
     importing.value = false;
   }
@@ -117,6 +144,18 @@ async function importSelected() {
           {{ t("proxy.parse_share_links") }}
         </n-button>
       </n-flex>
+      <n-alert
+        v-if="import_errors.length"
+        type="error"
+        :bordered="false"
+      >
+        <template #header>{{ t("proxy.import_partial_failed_title") }}</template>
+        <n-list size="small">
+          <n-list-item v-for="(item, index) in import_errors" :key="index">
+            {{ item }}
+          </n-list-item>
+        </n-list>
+      </n-alert>
 
       <n-data-table
         v-if="parsed.length"

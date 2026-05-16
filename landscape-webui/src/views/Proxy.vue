@@ -21,10 +21,12 @@ import type {
   ProxyNodeConfig,
   ProxyNodeRuntimeStatus,
 } from "@landscape-router/types/api/schemas";
+import { useMessage } from "naive-ui";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
+const message = useMessage();
 const nodes = ref<ProxyNodeConfig[]>([]);
 const runtime_statuses = ref<ProxyNodeRuntimeStatus[]>([]);
 const bypass_rule_sources_status = ref<ProxyBypassRuleSourcesStatus>();
@@ -34,6 +36,7 @@ const active_tab = ref("nodes");
 const rule_sources_loading = ref(false);
 const runtime_loading = ref(false);
 const latency_loading = ref(false);
+const refresh_loading = ref(false);
 const latency_results = ref<ProxyLatencyTestResult[]>([]);
 const rule_sources_ready = computed(
   () =>
@@ -55,21 +58,37 @@ const runtime_state = computed(
 );
 
 async function refresh() {
-  const [nodes_result, runtime_result, rule_sources_result] =
-    await Promise.allSettled([
-      get_proxy_nodes(),
-      get_proxy_runtime_statuses(),
-      get_proxy_bypass_rule_sources_status(),
-    ]);
+  refresh_loading.value = true;
+  try {
+    const [nodes_result, runtime_result, rule_sources_result] =
+      await Promise.allSettled([
+        get_proxy_nodes(),
+        get_proxy_runtime_statuses(),
+        get_proxy_bypass_rule_sources_status(),
+      ]);
 
-  if (nodes_result.status === "fulfilled") {
-    nodes.value = nodes_result.value;
-  }
-  if (runtime_result.status === "fulfilled") {
-    runtime_statuses.value = runtime_result.value;
-  }
-  if (rule_sources_result.status === "fulfilled") {
-    bypass_rule_sources_status.value = rule_sources_result.value;
+    const errors: string[] = [];
+    if (nodes_result.status === "fulfilled") {
+      nodes.value = nodes_result.value;
+    } else {
+      errors.push(t("proxy.load_nodes_failed"));
+    }
+    if (runtime_result.status === "fulfilled") {
+      runtime_statuses.value = runtime_result.value;
+    } else {
+      errors.push(t("proxy.load_runtime_failed"));
+    }
+    if (rule_sources_result.status === "fulfilled") {
+      bypass_rule_sources_status.value = rule_sources_result.value;
+    } else {
+      errors.push(t("proxy.load_rule_sources_failed"));
+    }
+
+    if (errors.length) {
+      message.error(errors.join(" / "));
+    }
+  } finally {
+    refresh_loading.value = false;
   }
 }
 
@@ -79,6 +98,11 @@ async function runRuleSourceRefresh(
   rule_sources_loading.value = true;
   try {
     bypass_rule_sources_status.value = await action();
+    message.success(t("proxy.rule_sources_refresh_success"));
+  } catch (error) {
+    message.error(
+      error instanceof Error ? error.message : String(error),
+    );
   } finally {
     rule_sources_loading.value = false;
   }
@@ -196,7 +220,11 @@ onMounted(refresh);
                   </template>
                   {{ t("proxy.confirm_remove_runtime") }}
                 </n-popconfirm>
-                <n-button secondary @click="refresh">
+                <n-button
+                  secondary
+                  :loading="refresh_loading"
+                  @click="refresh"
+                >
                   {{ t("common.refresh") }}
                 </n-button>
                 <n-button
