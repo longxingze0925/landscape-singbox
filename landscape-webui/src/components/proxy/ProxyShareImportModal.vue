@@ -97,11 +97,8 @@ async function importSelected() {
         await push_proxy_node(node);
         success_count += 1;
       } catch (error) {
-        const text =
-          error instanceof Error ? error.message : String(error);
-        import_errors.value.push(
-          `${node.name || node.server}: ${text}`,
-        );
+        const text = error instanceof Error ? error.message : String(error);
+        import_errors.value.push(`${node.name || node.server}: ${text}`);
       }
     }
     if (success_count > 0) {
@@ -113,10 +110,12 @@ async function importSelected() {
       return;
     }
 
-    message.error(t("proxy.import_partial_failed", {
-      success: success_count,
-      failed: import_errors.value.length,
-    }));
+    message.error(
+      t("proxy.import_partial_failed", {
+        success: success_count,
+        failed: import_errors.value.length,
+      }),
+    );
   } finally {
     importing.value = false;
   }
@@ -144,12 +143,10 @@ async function importSelected() {
           {{ t("proxy.parse_share_links") }}
         </n-button>
       </n-flex>
-      <n-alert
-        v-if="import_errors.length"
-        type="error"
-        :bordered="false"
-      >
-        <template #header>{{ t("proxy.import_partial_failed_title") }}</template>
+      <n-alert v-if="import_errors.length" type="error" :bordered="false">
+        <template #header>{{
+          t("proxy.import_partial_failed_title")
+        }}</template>
         <n-list size="small">
           <n-list-item v-for="(item, index) in import_errors" :key="index">
             {{ item }}

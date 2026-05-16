@@ -100,9 +100,7 @@ async function runRuleSourceRefresh(
     bypass_rule_sources_status.value = await action();
     message.success(t("proxy.rule_sources_refresh_success"));
   } catch (error) {
-    message.error(
-      error instanceof Error ? error.message : String(error),
-    );
+    message.error(error instanceof Error ? error.message : String(error));
   } finally {
     rule_sources_loading.value = false;
   }
@@ -220,11 +218,7 @@ onMounted(refresh);
                   </template>
                   {{ t("proxy.confirm_remove_runtime") }}
                 </n-popconfirm>
-                <n-button
-                  secondary
-                  :loading="refresh_loading"
-                  @click="refresh"
-                >
+                <n-button secondary :loading="refresh_loading" @click="refresh">
                   {{ t("common.refresh") }}
                 </n-button>
                 <n-button
