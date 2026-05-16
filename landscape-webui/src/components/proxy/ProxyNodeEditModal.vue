@@ -168,141 +168,141 @@ watch(
   >
     <n-spin :show="loading">
       <n-form v-if="node" label-placement="top">
-      <n-grid :cols="2" :x-gap="12">
-        <n-form-item-gi :label="t('common.name')">
-          <n-input v-model:value="node.name" />
-        </n-form-item-gi>
-        <n-form-item-gi :label="t('proxy.protocol')">
-          <n-select
-            v-model:value="node.protocol.t"
-            :options="protocolOptions"
-            @update:value="onProtocolChange"
-          />
-        </n-form-item-gi>
-        <n-form-item-gi :label="t('proxy.server')">
-          <n-input v-model:value="node.server" />
-        </n-form-item-gi>
-        <n-form-item-gi :label="t('proxy.port')">
-          <n-input-number
-            v-model:value="node.port"
-            :min="1"
-            :max="65535"
-            style="width: 100%"
-          />
-        </n-form-item-gi>
-      </n-grid>
-
-      <template v-if="node.protocol.t === 'vless'">
-        <n-form-item label="UUID">
-          <n-input v-model:value="node.protocol.uuid" />
-        </n-form-item>
-        <n-grid :cols="3" :x-gap="12">
-          <n-form-item-gi label="TLS">
-            <n-switch v-model:value="node.protocol.tls" />
+        <n-grid :cols="2" :x-gap="12">
+          <n-form-item-gi :label="t('common.name')">
+            <n-input v-model:value="node.name" />
           </n-form-item-gi>
-          <n-form-item-gi label="Reality">
-            <n-switch
-              v-model:value="node.protocol.reality"
-              @update:value="node.protocol.tls = node.protocol.tls || $event"
+          <n-form-item-gi :label="t('proxy.protocol')">
+            <n-select
+              v-model:value="node.protocol.t"
+              :options="protocolOptions"
+              @update:value="onProtocolChange"
             />
           </n-form-item-gi>
-          <n-form-item-gi label="uTLS">
-            <n-input
-              v-model:value="node.protocol.utls_fingerprint"
-              placeholder="chrome"
-              clearable
-            />
+          <n-form-item-gi :label="t('proxy.server')">
+            <n-input v-model:value="node.server" />
           </n-form-item-gi>
-        </n-grid>
-        <n-grid :cols="3" :x-gap="12">
-          <n-form-item-gi label="SNI">
-            <n-input v-model:value="node.protocol.server_name" clearable />
-          </n-form-item-gi>
-          <n-form-item-gi label="Flow">
-            <n-input
-              v-model:value="node.protocol.flow"
-              placeholder="xtls-rprx-vision"
-              clearable
-            />
-          </n-form-item-gi>
-          <n-form-item-gi label="Reality Public Key">
-            <n-input
-              v-model:value="node.protocol.reality_public_key"
-              clearable
-            />
-          </n-form-item-gi>
-        </n-grid>
-        <n-form-item label="Reality Short ID">
-          <n-input v-model:value="node.protocol.reality_short_id" clearable />
-        </n-form-item>
-      </template>
-
-      <template v-else-if="node.protocol.t === 'vmess'">
-        <n-form-item label="UUID">
-          <n-input v-model:value="node.protocol.uuid" />
-        </n-form-item>
-        <n-grid :cols="4" :x-gap="12">
-          <n-form-item-gi label="Alter ID">
+          <n-form-item-gi :label="t('proxy.port')">
             <n-input-number
-              v-model:value="node.protocol.alter_id"
-              :min="0"
+              v-model:value="node.port"
+              :min="1"
+              :max="65535"
               style="width: 100%"
             />
           </n-form-item-gi>
-          <n-form-item-gi label="Security">
-            <n-select
-              v-model:value="node.protocol.security"
-              :options="securityOptions"
-            />
-          </n-form-item-gi>
-          <n-form-item-gi label="TLS">
-            <n-switch v-model:value="node.protocol.tls" />
-          </n-form-item-gi>
-          <n-form-item-gi label="SNI">
-            <n-input v-model:value="node.protocol.server_name" clearable />
-          </n-form-item-gi>
         </n-grid>
-      </template>
 
-      <template v-else-if="node.protocol.t === 'shadowsocks'">
-        <n-grid :cols="2" :x-gap="12">
-          <n-form-item-gi :label="t('proxy.method')">
-            <n-select
-              v-model:value="node.protocol.method"
-              filterable
-              tag
-              :options="ssMethodOptions"
-            />
-          </n-form-item-gi>
-          <n-form-item-gi :label="t('common.password')">
-            <n-input
-              v-model:value="node.protocol.password"
-              type="password"
-              show-password-on="click"
-            />
-          </n-form-item-gi>
-        </n-grid>
-      </template>
+        <template v-if="node.protocol.t === 'vless'">
+          <n-form-item label="UUID">
+            <n-input v-model:value="node.protocol.uuid" />
+          </n-form-item>
+          <n-grid :cols="3" :x-gap="12">
+            <n-form-item-gi label="TLS">
+              <n-switch v-model:value="node.protocol.tls" />
+            </n-form-item-gi>
+            <n-form-item-gi label="Reality">
+              <n-switch
+                v-model:value="node.protocol.reality"
+                @update:value="node.protocol.tls = node.protocol.tls || $event"
+              />
+            </n-form-item-gi>
+            <n-form-item-gi label="uTLS">
+              <n-input
+                v-model:value="node.protocol.utls_fingerprint"
+                placeholder="chrome"
+                clearable
+              />
+            </n-form-item-gi>
+          </n-grid>
+          <n-grid :cols="3" :x-gap="12">
+            <n-form-item-gi label="SNI">
+              <n-input v-model:value="node.protocol.server_name" clearable />
+            </n-form-item-gi>
+            <n-form-item-gi label="Flow">
+              <n-input
+                v-model:value="node.protocol.flow"
+                placeholder="xtls-rprx-vision"
+                clearable
+              />
+            </n-form-item-gi>
+            <n-form-item-gi label="Reality Public Key">
+              <n-input
+                v-model:value="node.protocol.reality_public_key"
+                clearable
+              />
+            </n-form-item-gi>
+          </n-grid>
+          <n-form-item label="Reality Short ID">
+            <n-input v-model:value="node.protocol.reality_short_id" clearable />
+          </n-form-item>
+        </template>
 
-      <template v-else-if="node.protocol.t === 'socks5'">
-        <n-grid :cols="2" :x-gap="12">
-          <n-form-item-gi :label="t('common.username')">
-            <n-input v-model:value="node.protocol.username" clearable />
-          </n-form-item-gi>
-          <n-form-item-gi :label="t('common.password')">
-            <n-input
-              v-model:value="node.protocol.password"
-              type="password"
-              show-password-on="click"
-              clearable
-            />
-          </n-form-item-gi>
-        </n-grid>
-      </template>
+        <template v-else-if="node.protocol.t === 'vmess'">
+          <n-form-item label="UUID">
+            <n-input v-model:value="node.protocol.uuid" />
+          </n-form-item>
+          <n-grid :cols="4" :x-gap="12">
+            <n-form-item-gi label="Alter ID">
+              <n-input-number
+                v-model:value="node.protocol.alter_id"
+                :min="0"
+                style="width: 100%"
+              />
+            </n-form-item-gi>
+            <n-form-item-gi label="Security">
+              <n-select
+                v-model:value="node.protocol.security"
+                :options="securityOptions"
+              />
+            </n-form-item-gi>
+            <n-form-item-gi label="TLS">
+              <n-switch v-model:value="node.protocol.tls" />
+            </n-form-item-gi>
+            <n-form-item-gi label="SNI">
+              <n-input v-model:value="node.protocol.server_name" clearable />
+            </n-form-item-gi>
+          </n-grid>
+        </template>
 
-      <n-form-item :label="t('common.remark')">
-        <n-input v-model:value="node.remark" type="textarea" />
-      </n-form-item>
+        <template v-else-if="node.protocol.t === 'shadowsocks'">
+          <n-grid :cols="2" :x-gap="12">
+            <n-form-item-gi :label="t('proxy.method')">
+              <n-select
+                v-model:value="node.protocol.method"
+                filterable
+                tag
+                :options="ssMethodOptions"
+              />
+            </n-form-item-gi>
+            <n-form-item-gi :label="t('common.password')">
+              <n-input
+                v-model:value="node.protocol.password"
+                type="password"
+                show-password-on="click"
+              />
+            </n-form-item-gi>
+          </n-grid>
+        </template>
+
+        <template v-else-if="node.protocol.t === 'socks5'">
+          <n-grid :cols="2" :x-gap="12">
+            <n-form-item-gi :label="t('common.username')">
+              <n-input v-model:value="node.protocol.username" clearable />
+            </n-form-item-gi>
+            <n-form-item-gi :label="t('common.password')">
+              <n-input
+                v-model:value="node.protocol.password"
+                type="password"
+                show-password-on="click"
+                clearable
+              />
+            </n-form-item-gi>
+          </n-grid>
+        </template>
+
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="node.remark" type="textarea" />
+        </n-form-item>
       </n-form>
     </n-spin>
     <template #footer>
