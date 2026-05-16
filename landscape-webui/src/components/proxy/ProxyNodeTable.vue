@@ -35,7 +35,8 @@ const editing_node_id = ref<string>();
 const latency_map = computed(() => {
   const map = new Map<string, Map<string, ProxyLatencyTestResult>>();
   for (const item of props.latencyResults) {
-    const node_map = map.get(item.node_id) || new Map<string, ProxyLatencyTestResult>();
+    const node_map =
+      map.get(item.node_id) || new Map<string, ProxyLatencyTestResult>();
     node_map.set(item.target, item);
     map.set(item.node_id, node_map);
   }

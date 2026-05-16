@@ -18,9 +18,9 @@ use bollard::{
 use landscape_common::{
     flow::{config::FlowConfig, FlowTarget},
     proxy::{
-        proxy_container_name, ProxyError, ProxyNodeConfig, ProxyNodeRuntimeStatus,
-        ProxyLatencyTestRequest, ProxyLatencyTestResult, ProxyLatencyTestState,
-        ProxyLatencyTestTarget, ProxyProtocolConfig, ProxyRuntimeState, PROXY_CONTAINER_NAME_PREFIX,
+        proxy_container_name, ProxyError, ProxyLatencyTestRequest, ProxyLatencyTestResult,
+        ProxyLatencyTestState, ProxyLatencyTestTarget, ProxyNodeConfig, ProxyNodeRuntimeStatus,
+        ProxyProtocolConfig, ProxyRuntimeState, PROXY_CONTAINER_NAME_PREFIX,
         PROXY_RUNTIME_CONTAINER_NAME,
     },
     utils::time::get_f64_timestamp,
@@ -268,8 +268,7 @@ impl ProxyRuntimeService {
     }
 
     async fn sync_all_nodes(&self) -> Result<(), ProxyError> {
-        let nodes: Vec<ProxyNodeConfig> =
-            self.enabled_sorted_nodes().await;
+        let nodes: Vec<ProxyNodeConfig> = self.enabled_sorted_nodes().await;
         if nodes.is_empty() {
             self.remove_runtime_container_and_legacy_containers().await?;
             return Ok(());
@@ -281,7 +280,10 @@ impl ProxyRuntimeService {
         Ok(())
     }
 
-    async fn runtime_container_state(&self, docker: &Docker) -> Result<ProxyRuntimeState, ProxyError> {
+    async fn runtime_container_state(
+        &self,
+        docker: &Docker,
+    ) -> Result<ProxyRuntimeState, ProxyError> {
         match docker
             .inspect_container(PROXY_RUNTIME_CONTAINER_NAME, None::<InspectContainerOptions>)
             .await
@@ -683,11 +685,12 @@ fn flow_tproxy_port(flow_id: u32) -> Result<u16, ProxyError> {
 
 fn node_test_port(index: usize) -> Result<u16, ProxyError> {
     let port = NODE_TEST_PORT_BASE
-        + u32::try_from(index).map_err(|_| {
-            ProxyError::RuntimeConfigError("proxy node index overflow".to_string())
-        })?;
+        + u32::try_from(index)
+            .map_err(|_| ProxyError::RuntimeConfigError("proxy node index overflow".to_string()))?;
     u16::try_from(port).map_err(|_| {
-        ProxyError::RuntimeConfigError(format!("proxy node index {index} maps to invalid test port"))
+        ProxyError::RuntimeConfigError(format!(
+            "proxy node index {index} maps to invalid test port"
+        ))
     })
 }
 

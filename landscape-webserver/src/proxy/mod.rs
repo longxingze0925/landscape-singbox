@@ -3,8 +3,8 @@ use landscape_common::api_response::LandscapeApiResp as CommonApiResp;
 use landscape_common::config::ConfigId;
 use landscape_common::flow::FlowTarget;
 use landscape_common::proxy::{
-    ProxyBypassRuleSourceKind, ProxyBypassRuleSourcesStatus, ProxyError, ProxyMode,
-    ProxyLatencyTestRequest, ProxyLatencyTestResult, ProxyNodeConfig, ProxyNodeRuntimeStatus,
+    ProxyBypassRuleSourceKind, ProxyBypassRuleSourcesStatus, ProxyError, ProxyLatencyTestRequest,
+    ProxyLatencyTestResult, ProxyMode, ProxyNodeConfig, ProxyNodeRuntimeStatus,
 };
 use landscape_common::service::controller::ConfigController;
 use utoipa_axum::router::OpenApiRouter;
