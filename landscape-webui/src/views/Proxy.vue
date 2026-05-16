@@ -55,14 +55,22 @@ const runtime_state = computed(
 );
 
 async function refresh() {
-  const [node_list, status_list, rule_sources_status] = await Promise.all([
-    get_proxy_nodes(),
-    get_proxy_runtime_statuses(),
-    get_proxy_bypass_rule_sources_status(),
-  ]);
-  nodes.value = node_list;
-  runtime_statuses.value = status_list;
-  bypass_rule_sources_status.value = rule_sources_status;
+  const [nodes_result, runtime_result, rule_sources_result] =
+    await Promise.allSettled([
+      get_proxy_nodes(),
+      get_proxy_runtime_statuses(),
+      get_proxy_bypass_rule_sources_status(),
+    ]);
+
+  if (nodes_result.status === "fulfilled") {
+    nodes.value = nodes_result.value;
+  }
+  if (runtime_result.status === "fulfilled") {
+    runtime_statuses.value = runtime_result.value;
+  }
+  if (rule_sources_result.status === "fulfilled") {
+    bypass_rule_sources_status.value = rule_sources_result.value;
+  }
 }
 
 async function runRuleSourceRefresh(

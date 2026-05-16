@@ -28,6 +28,8 @@ use crate::{
 
 const GEO_SOURCE_NAME: &str = "proxy-default";
 const GEO_CN_KEY: &str = "CN";
+const GEO_SITE_SOURCE_URL: &str = "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat";
+const GEO_IP_SOURCE_URL: &str = "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat";
 const AUTO_DNS_RULE_PREFIX: &str = "__landscape_proxy_bypass_china_dns__";
 const AUTO_DST_IP_RULE_PREFIX: &str = "__landscape_proxy_bypass_china_ip__";
 const AUTO_RULE_INDEX_BASE: u32 = 1000;
@@ -233,6 +235,7 @@ impl ProxyBypassService {
             .into_iter()
             .any(|config| config.name == GEO_SOURCE_NAME);
         if exists {
+            self.repair_geo_site_source().await;
             return;
         }
 
@@ -243,7 +246,7 @@ impl ProxyBypassService {
                 name: GEO_SOURCE_NAME.to_string(),
                 enable: true,
                 source: GeoSiteSource::Url {
-                    url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat".to_string(),
+                    url: GEO_SITE_SOURCE_URL.to_string(),
                     next_update_at: 0.0,
                     geo_keys: vec![GEO_CN_KEY.to_string()],
                 },
@@ -259,6 +262,7 @@ impl ProxyBypassService {
             .into_iter()
             .any(|config| config.name == GEO_SOURCE_NAME);
         if exists {
+            self.repair_geo_ip_source().await;
             return;
         }
 
@@ -269,14 +273,74 @@ impl ProxyBypassService {
                 name: GEO_SOURCE_NAME.to_string(),
                 enable: true,
                 source: GeoIpSource::Url {
-                    url: "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"
-                        .to_string(),
+                    url: GEO_IP_SOURCE_URL.to_string(),
                     next_update_at: 0.0,
                     format: GeoIpFileFormat::Dat,
                     txt_key: None,
                 },
             })
             .await;
+    }
+
+    async fn repair_geo_site_source(&self) {
+        let mut configs = self
+            .geo_site_service
+            .query_geo_by_name(Some(GEO_SOURCE_NAME.to_string()))
+            .await
+            .into_iter()
+            .filter(|config| config.name == GEO_SOURCE_NAME)
+            .collect::<Vec<_>>();
+        if let Some(mut config) = configs.pop() {
+            let needs_fix = !matches!(
+                &config.source,
+                GeoSiteSource::Url { url, geo_keys, .. }
+                    if url == GEO_SITE_SOURCE_URL
+                        && geo_keys.len() == 1
+                        && geo_keys.first().map(|value| value.as_str()) == Some(GEO_CN_KEY)
+            );
+            if needs_fix {
+                config.source = GeoSiteSource::Url {
+                    url: GEO_SITE_SOURCE_URL.to_string(),
+                    next_update_at: 0.0,
+                    geo_keys: vec![GEO_CN_KEY.to_string()],
+                };
+                config.update_at = get_f64_timestamp();
+                self.geo_site_service.set(config).await;
+            }
+        }
+    }
+
+    async fn repair_geo_ip_source(&self) {
+        let mut configs = self
+            .geo_ip_service
+            .query_geo_by_name(Some(GEO_SOURCE_NAME.to_string()))
+            .await
+            .into_iter()
+            .filter(|config| config.name == GEO_SOURCE_NAME)
+            .collect::<Vec<_>>();
+        if let Some(mut config) = configs.pop() {
+            let needs_fix = !matches!(
+                &config.source,
+                GeoIpSource::Url {
+                    url,
+                    format,
+                    txt_key,
+                    ..
+                } if url == GEO_IP_SOURCE_URL
+                    && *format == GeoIpFileFormat::Dat
+                    && txt_key.is_none()
+            );
+            if needs_fix {
+                config.source = GeoIpSource::Url {
+                    url: GEO_IP_SOURCE_URL.to_string(),
+                    next_update_at: 0.0,
+                    format: GeoIpFileFormat::Dat,
+                    txt_key: None,
+                };
+                config.update_at = get_f64_timestamp();
+                self.geo_ip_service.set(config).await;
+            }
+        }
     }
 
     async fn domain_rule_source_status(&self) -> ProxyBypassRuleSourceStatus {
