@@ -5,7 +5,7 @@ import type {
   ProxyNodeConfig,
   ProxyProtocolConfig,
 } from "@landscape-router/types/api/schemas";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 type Props = {
@@ -20,6 +20,8 @@ const { t } = useI18n();
 const node = ref<ProxyNodeConfig>();
 const origin_json = ref("");
 const commit_spin = ref(false);
+const loading = ref(false);
+let load_seq = 0;
 
 const isModified = computed(
   () => JSON.stringify(node.value) !== origin_json.value,
@@ -106,13 +108,27 @@ function onProtocolChange(value: string) {
 }
 
 async function enter() {
-  node.value = props.node_id
-    ? await get_proxy_node(props.node_id)
-    : defaultNode();
-  origin_json.value = JSON.stringify(node.value);
+  const seq = ++load_seq;
+  loading.value = true;
+  node.value = undefined;
+  origin_json.value = "";
+  try {
+    const next_node = props.node_id
+      ? await get_proxy_node(props.node_id)
+      : defaultNode();
+    if (seq !== load_seq) return;
+    node.value = next_node;
+    origin_json.value = JSON.stringify(next_node);
+  } finally {
+    if (seq === load_seq) {
+      loading.value = false;
+    }
+  }
 }
 
 function exit() {
+  load_seq++;
+  loading.value = false;
   node.value = defaultNode();
   origin_json.value = JSON.stringify(node.value);
 }
@@ -128,6 +144,18 @@ async function saveNode() {
     commit_spin.value = false;
   }
 }
+
+watch(
+  () => [show.value, props.node_id] as const,
+  ([visible]) => {
+    if (visible) {
+      void enter();
+    } else {
+      exit();
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -137,10 +165,9 @@ async function saveNode() {
     :switch-disabled="!node"
     :title="t('proxy.edit_title')"
     width="660px"
-    @after-enter="enter"
-    @after-leave="exit"
   >
-    <n-form v-if="node" label-placement="top">
+    <n-spin :show="loading">
+      <n-form v-if="node" label-placement="top">
       <n-grid :cols="2" :x-gap="12">
         <n-form-item-gi :label="t('common.name')">
           <n-input v-model:value="node.name" />
@@ -276,7 +303,8 @@ async function saveNode() {
       <n-form-item :label="t('common.remark')">
         <n-input v-model:value="node.remark" type="textarea" />
       </n-form-item>
-    </n-form>
+      </n-form>
+    </n-spin>
     <template #footer>
       <n-flex justify="space-between">
         <n-button @click="show = false">{{ t("common.cancel") }}</n-button>
