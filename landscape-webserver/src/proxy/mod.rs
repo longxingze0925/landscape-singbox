@@ -4,7 +4,7 @@ use landscape_common::config::ConfigId;
 use landscape_common::flow::FlowTarget;
 use landscape_common::proxy::{
     ProxyBypassRuleSourceKind, ProxyBypassRuleSourcesStatus, ProxyError, ProxyMode,
-    ProxyNodeConfig, ProxyNodeRuntimeStatus,
+    ProxyLatencyTestRequest, ProxyLatencyTestResult, ProxyNodeConfig, ProxyNodeRuntimeStatus,
 };
 use landscape_common::service::controller::ConfigController;
 use utoipa_axum::router::OpenApiRouter;
@@ -22,6 +22,7 @@ pub fn get_proxy_paths() -> OpenApiRouter<LandscapeApp> {
         .routes(routes!(sync_proxy_runtime))
         .routes(routes!(stop_proxy_runtime))
         .routes(routes!(remove_proxy_runtime))
+        .routes(routes!(test_proxy_latency))
         .routes(routes!(get_bypass_rule_sources_status))
         .routes(routes!(refresh_bypass_domain_rule_source))
         .routes(routes!(refresh_bypass_ip_rule_source))
@@ -184,6 +185,21 @@ async fn remove_proxy_runtime(
     Path(id): Path<ConfigId>,
 ) -> LandscapeApiResult<ProxyNodeRuntimeStatus> {
     let result = state.proxy_runtime_service.remove_node_container(id).await?;
+    LandscapeApiResp::success(result)
+}
+
+#[utoipa::path(
+    post,
+    path = "/runtime/latency",
+    tag = "Proxy",
+    request_body = ProxyLatencyTestRequest,
+    responses((status = 200, body = CommonApiResp<Vec<ProxyLatencyTestResult>>))
+)]
+async fn test_proxy_latency(
+    State(state): State<LandscapeApp>,
+    JsonBody(request): JsonBody<ProxyLatencyTestRequest>,
+) -> LandscapeApiResult<Vec<ProxyLatencyTestResult>> {
+    let result = state.proxy_runtime_service.test_latency(request).await?;
     LandscapeApiResp::success(result)
 }
 

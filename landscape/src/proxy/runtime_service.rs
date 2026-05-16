@@ -1,7 +1,10 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use bollard::{
+    container::LogOutput,
     errors::Error as DockerBollardError,
+    exec::{CreateExecOptions, StartExecOptions, StartExecResults},
     query_parameters::{
         CreateContainerOptions, CreateImageOptions, InspectContainerOptions,
         RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
@@ -16,9 +19,11 @@ use landscape_common::{
     flow::{config::FlowConfig, FlowTarget},
     proxy::{
         proxy_container_name, ProxyError, ProxyNodeConfig, ProxyNodeRuntimeStatus,
-        ProxyProtocolConfig, ProxyRuntimeState, PROXY_CONTAINER_NAME_PREFIX,
+        ProxyLatencyTestRequest, ProxyLatencyTestResult, ProxyLatencyTestState,
+        ProxyLatencyTestTarget, ProxyProtocolConfig, ProxyRuntimeState, PROXY_CONTAINER_NAME_PREFIX,
         PROXY_RUNTIME_CONTAINER_NAME,
     },
+    utils::time::get_f64_timestamp,
     NAMESPACE_REGISTER_SOCK_PATH, NAMESPACE_REGISTER_SOCK_PATH_IN_DOCKER,
 };
 use serde_json::{json, Map, Value};
@@ -31,6 +36,10 @@ use landscape_common::service::controller::ConfigController;
 const DEFAULT_PROXY_IMAGE: &str = "ghcr.io/longxingze0925/landscape-singbox:latest";
 const FLOW_TPROXY_PORT_BASE: u32 = 12000;
 const DEFAULT_FLOW_TPROXY_PORT: u16 = FLOW_TPROXY_PORT_BASE as u16;
+const NODE_TEST_PORT_BASE: u32 = 12100;
+const LATENCY_TEST_TIMEOUT_SECS: u64 = 8;
+const CHINA_LATENCY_TEST_URL: &str = "https://www.baidu.com";
+const GLOBAL_LATENCY_TEST_URL: &str = "https://www.gstatic.com/generate_204";
 
 #[derive(Clone)]
 pub struct ProxyRuntimeService {
@@ -115,6 +124,99 @@ impl ProxyRuntimeService {
         self.sync_all_nodes().await
     }
 
+    pub async fn test_latency(
+        &self,
+        request: ProxyLatencyTestRequest,
+    ) -> Result<Vec<ProxyLatencyTestResult>, ProxyError> {
+        let mut nodes = self.sorted_nodes().await;
+        if !request.node_ids.is_empty() {
+            let ids: std::collections::HashSet<Uuid> = request.node_ids.into_iter().collect();
+            nodes.retain(|node| ids.contains(&node.id));
+        }
+
+        let targets = if request.targets.is_empty() {
+            vec![ProxyLatencyTestTarget::China, ProxyLatencyTestTarget::Global]
+        } else {
+            request.targets
+        };
+
+        let enabled_nodes = self.enabled_sorted_nodes().await;
+        let mut port_map = std::collections::HashMap::new();
+        for (index, node) in enabled_nodes.iter().enumerate() {
+            port_map.insert(node.id, node_test_port(index)?);
+        }
+        let mut results = Vec::new();
+        let docker = match docker() {
+            Ok(docker) => docker,
+            Err(err) => {
+                for node in nodes {
+                    for target in &targets {
+                        results.push(latency_result(
+                            &node,
+                            target.clone(),
+                            ProxyLatencyTestState::RuntimeMissing,
+                            None,
+                            Some(err.to_string()),
+                        ));
+                    }
+                }
+                return Ok(results);
+            }
+        };
+
+        let runtime_state = self.runtime_container_state(&docker).await?;
+        if runtime_state != ProxyRuntimeState::Running {
+            for node in nodes {
+                for target in &targets {
+                    results.push(latency_result(
+                        &node,
+                        target.clone(),
+                        ProxyLatencyTestState::RuntimeMissing,
+                        None,
+                        Some(format!("proxy runtime is {runtime_state:?}")),
+                    ));
+                }
+            }
+            return Ok(results);
+        }
+
+        for node in nodes {
+            if !node.enable {
+                for target in &targets {
+                    results.push(latency_result(
+                        &node,
+                        target.clone(),
+                        ProxyLatencyTestState::Disabled,
+                        None,
+                        None,
+                    ));
+                }
+                continue;
+            }
+
+            let Some(&port) = port_map.get(&node.id) else {
+                for target in &targets {
+                    results.push(latency_result(
+                        &node,
+                        target.clone(),
+                        ProxyLatencyTestState::Failed,
+                        None,
+                        Some("missing test port mapping".to_string()),
+                    ));
+                }
+                continue;
+            };
+
+            for target in &targets {
+                let result =
+                    self.test_node_target_latency(&docker, &node, port, target.clone()).await;
+                results.push(result);
+            }
+        }
+
+        Ok(results)
+    }
+
     async fn status_for_node(
         &self,
         node: &ProxyNodeConfig,
@@ -167,7 +269,7 @@ impl ProxyRuntimeService {
 
     async fn sync_all_nodes(&self) -> Result<(), ProxyError> {
         let nodes: Vec<ProxyNodeConfig> =
-            self.node_service.list().await.into_iter().filter(|node| node.enable).collect();
+            self.enabled_sorted_nodes().await;
         if nodes.is_empty() {
             self.remove_runtime_container_and_legacy_containers().await?;
             return Ok(());
@@ -177,6 +279,91 @@ impl ProxyRuntimeService {
         self.write_config(&nodes, &flows).await?;
         self.recreate_container().await?;
         Ok(())
+    }
+
+    async fn runtime_container_state(&self, docker: &Docker) -> Result<ProxyRuntimeState, ProxyError> {
+        match docker
+            .inspect_container(PROXY_RUNTIME_CONTAINER_NAME, None::<InspectContainerOptions>)
+            .await
+        {
+            Ok(info) => {
+                let status = info.state.as_ref().and_then(|state| state.status);
+                Ok(match status {
+                    Some(ContainerStateStatusEnum::RUNNING) => ProxyRuntimeState::Running,
+                    Some(ContainerStateStatusEnum::CREATED) => ProxyRuntimeState::Created,
+                    Some(ContainerStateStatusEnum::EXITED)
+                    | Some(ContainerStateStatusEnum::DEAD) => ProxyRuntimeState::Exited,
+                    _ => ProxyRuntimeState::Unknown,
+                })
+            }
+            Err(DockerBollardError::DockerResponseServerError { status_code, .. })
+                if status_code == 404 =>
+            {
+                Ok(ProxyRuntimeState::Missing)
+            }
+            Err(err) => Err(ProxyError::RuntimeDockerError(err.to_string())),
+        }
+    }
+
+    async fn test_node_target_latency(
+        &self,
+        docker: &Docker,
+        node: &ProxyNodeConfig,
+        port: u16,
+        target: ProxyLatencyTestTarget,
+    ) -> ProxyLatencyTestResult {
+        let url = latency_target_url(&target);
+        let proxy = format!("http://127.0.0.1:{port}");
+        let cmd = vec![
+            "curl".to_string(),
+            "-L".to_string(),
+            "-sS".to_string(),
+            "-o".to_string(),
+            "/dev/null".to_string(),
+            "-w".to_string(),
+            "%{time_total}".to_string(),
+            "--max-time".to_string(),
+            LATENCY_TEST_TIMEOUT_SECS.to_string(),
+            "-x".to_string(),
+            proxy,
+            url.to_string(),
+        ];
+
+        match tokio::time::timeout(
+            Duration::from_secs(LATENCY_TEST_TIMEOUT_SECS + 2),
+            exec_container_command(docker, PROXY_RUNTIME_CONTAINER_NAME, cmd),
+        )
+        .await
+        {
+            Err(_) => latency_result(
+                node,
+                target,
+                ProxyLatencyTestState::Timeout,
+                None,
+                Some("latency test timed out".to_string()),
+            ),
+            Ok(Err(err)) => latency_result(
+                node,
+                target,
+                ProxyLatencyTestState::Failed,
+                None,
+                Some(err.to_string()),
+            ),
+            Ok(Ok(output)) => parse_curl_latency_output(node, target, output),
+        }
+    }
+
+    async fn enabled_sorted_nodes(&self) -> Vec<ProxyNodeConfig> {
+        let mut nodes: Vec<ProxyNodeConfig> =
+            self.node_service.list().await.into_iter().filter(|node| node.enable).collect();
+        nodes.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        nodes
+    }
+
+    async fn sorted_nodes(&self) -> Vec<ProxyNodeConfig> {
+        let mut nodes = self.node_service.list().await;
+        nodes.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+        nodes
     }
 
     async fn recreate_container(&self) -> Result<(), ProxyError> {
@@ -420,6 +607,20 @@ fn build_sing_box_config(
         "listen_port": DEFAULT_FLOW_TPROXY_PORT
     })];
     let mut route_rules = Vec::new();
+    for (index, node) in nodes.iter().enumerate() {
+        let inbound_tag = node_test_inbound_tag(node.id);
+        inbounds.push(json!({
+            "type": "mixed",
+            "tag": inbound_tag,
+            "listen": "127.0.0.1",
+            "listen_port": node_test_port(index)?
+        }));
+        route_rules.push(json!({
+            "inbound": [inbound_tag],
+            "outbound": node_outbound_tag(node.id)
+        }));
+    }
+
     for flow in flows.iter().filter(|flow| flow.enable) {
         let flow_proxy_tags = proxy_tags_for_flow(flow, &node_tags);
         if flow_proxy_tags.is_empty() {
@@ -480,6 +681,16 @@ fn flow_tproxy_port(flow_id: u32) -> Result<u16, ProxyError> {
     })
 }
 
+fn node_test_port(index: usize) -> Result<u16, ProxyError> {
+    let port = NODE_TEST_PORT_BASE
+        + u32::try_from(index).map_err(|_| {
+            ProxyError::RuntimeConfigError("proxy node index overflow".to_string())
+        })?;
+    u16::try_from(port).map_err(|_| {
+        ProxyError::RuntimeConfigError(format!("proxy node index {index} maps to invalid test port"))
+    })
+}
+
 fn flow_inbound_tag(flow_id: u32) -> String {
     format!("flow-{flow_id}")
 }
@@ -490,6 +701,10 @@ fn flow_selector_tag(flow_id: u32) -> String {
 
 fn node_outbound_tag(node_id: Uuid) -> String {
     format!("proxy-{}", node_id.simple())
+}
+
+fn node_test_inbound_tag(node_id: Uuid) -> String {
+    format!("test-{}", node_id.simple())
 }
 
 fn proxy_tags_for_flow(
@@ -570,6 +785,98 @@ fn build_outbound(node: &ProxyNodeConfig, tag: &str) -> Result<Value, ProxyError
     }
 
     Ok(Value::Object(base))
+}
+
+fn latency_target_url(target: &ProxyLatencyTestTarget) -> &'static str {
+    match target {
+        ProxyLatencyTestTarget::China => CHINA_LATENCY_TEST_URL,
+        ProxyLatencyTestTarget::Global => GLOBAL_LATENCY_TEST_URL,
+    }
+}
+
+fn latency_result(
+    node: &ProxyNodeConfig,
+    target: ProxyLatencyTestTarget,
+    state: ProxyLatencyTestState,
+    latency_ms: Option<u32>,
+    error: Option<String>,
+) -> ProxyLatencyTestResult {
+    ProxyLatencyTestResult {
+        node_id: node.id,
+        node_name: node.name.clone(),
+        target,
+        state,
+        latency_ms,
+        tested_at: get_f64_timestamp(),
+        error,
+    }
+}
+
+fn parse_curl_latency_output(
+    node: &ProxyNodeConfig,
+    target: ProxyLatencyTestTarget,
+    output: String,
+) -> ProxyLatencyTestResult {
+    let trimmed = output.trim();
+    match trimmed.parse::<f64>() {
+        Ok(seconds) => latency_result(
+            node,
+            target,
+            ProxyLatencyTestState::Success,
+            Some((seconds * 1000.0).round() as u32),
+            None,
+        ),
+        Err(_) => {
+            let lower = trimmed.to_lowercase();
+            let state = if lower.contains("timed out") || lower.contains("timeout") {
+                ProxyLatencyTestState::Timeout
+            } else {
+                ProxyLatencyTestState::Failed
+            };
+            latency_result(node, target, state, None, Some(trimmed.to_string()))
+        }
+    }
+}
+
+async fn exec_container_command(
+    docker: &Docker,
+    container_name: &str,
+    cmd: Vec<String>,
+) -> Result<String, ProxyError> {
+    let exec = docker
+        .create_exec(
+            container_name,
+            CreateExecOptions {
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                cmd: Some(cmd),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|err| ProxyError::LatencyTestError(err.to_string()))?;
+
+    let start = docker
+        .start_exec(&exec.id, None::<StartExecOptions>)
+        .await
+        .map_err(|err| ProxyError::LatencyTestError(err.to_string()))?;
+
+    let StartExecResults::Attached { mut output, .. } = start else {
+        return Err(ProxyError::LatencyTestError("docker exec did not attach output".into()));
+    };
+
+    let mut bytes = Vec::new();
+    while let Some(chunk) = output.next().await {
+        let chunk = chunk.map_err(|err| ProxyError::LatencyTestError(err.to_string()))?;
+        match chunk {
+            LogOutput::StdOut { message }
+            | LogOutput::StdErr { message }
+            | LogOutput::Console { message } => bytes.extend_from_slice(&message),
+            LogOutput::StdIn { .. } => {}
+        }
+    }
+
+    Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
 fn non_empty_opt(value: &Option<String>) -> Option<&str> {

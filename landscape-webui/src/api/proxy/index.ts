@@ -11,9 +11,12 @@ import {
   removeProxyRuntime,
   stopProxyRuntime,
   syncProxyRuntime,
+  testProxyLatency,
 } from "@landscape-router/types/api/proxy/proxy";
 import type {
   ProxyBypassRuleSourcesStatus,
+  ProxyLatencyTestRequest,
+  ProxyLatencyTestResult,
   ProxyNodeConfig,
   ProxyNodeRuntimeStatus,
 } from "@landscape-router/types/api/schemas";
@@ -74,4 +77,10 @@ export async function refresh_proxy_bypass_ip_rule_source(): Promise<ProxyBypass
 
 export async function refresh_proxy_bypass_rule_sources(): Promise<ProxyBypassRuleSourcesStatus> {
   return refreshBypassRuleSources();
+}
+
+export async function test_proxy_latency(
+  request: ProxyLatencyTestRequest,
+): Promise<ProxyLatencyTestResult[]> {
+  return testProxyLatency(request);
 }

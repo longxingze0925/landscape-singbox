@@ -33,6 +33,10 @@ pub enum ProxyError {
     #[api_error(id = "proxy.runtime_config_error", status = 400)]
     RuntimeConfigError(String),
 
+    #[error("Proxy latency test error: {0}")]
+    #[api_error(id = "proxy.latency_test_error", status = 500)]
+    LatencyTestError(String),
+
     #[error("Proxy bypass China Geo cache is missing")]
     #[api_error(id = "proxy.bypass_geo_cache_missing", status = 400)]
     BypassGeoCacheMissing,
@@ -128,6 +132,48 @@ pub struct ProxyNodeRuntimeStatus {
     pub image: String,
     #[cfg_attr(feature = "openapi", schema(required = true, nullable = true))]
     pub status: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyLatencyTestTarget {
+    China,
+    Global,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProxyLatencyTestRequest {
+    #[serde(default)]
+    pub targets: Vec<ProxyLatencyTestTarget>,
+    #[serde(default)]
+    pub node_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyLatencyTestState {
+    Success,
+    Timeout,
+    Failed,
+    Disabled,
+    RuntimeMissing,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ProxyLatencyTestResult {
+    pub node_id: Uuid,
+    pub node_name: String,
+    pub target: ProxyLatencyTestTarget,
+    pub state: ProxyLatencyTestState,
+    #[cfg_attr(feature = "openapi", schema(required = true, nullable = true))]
+    pub latency_ms: Option<u32>,
+    pub tested_at: f64,
+    #[cfg_attr(feature = "openapi", schema(required = true, nullable = true))]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

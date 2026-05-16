@@ -9,6 +9,7 @@ import {
   remove_proxy_runtime,
   stop_proxy_runtime,
   sync_proxy_runtime,
+  test_proxy_latency,
 } from "@/api/proxy";
 import ProxyBypassRuleSourceCard from "@/components/proxy/ProxyBypassRuleSourceCard.vue";
 import ProxyNodeEditModal from "@/components/proxy/ProxyNodeEditModal.vue";
@@ -16,6 +17,7 @@ import ProxyNodeTable from "@/components/proxy/ProxyNodeTable.vue";
 import ProxyShareImportModal from "@/components/proxy/ProxyShareImportModal.vue";
 import type {
   ProxyBypassRuleSourcesStatus,
+  ProxyLatencyTestResult,
   ProxyNodeConfig,
   ProxyNodeRuntimeStatus,
 } from "@landscape-router/types/api/schemas";
@@ -31,6 +33,8 @@ const show_import = ref(false);
 const active_tab = ref("nodes");
 const rule_sources_loading = ref(false);
 const runtime_loading = ref(false);
+const latency_loading = ref(false);
+const latency_results = ref<ProxyLatencyTestResult[]>([]);
 const rule_sources_ready = computed(
   () =>
     bypass_rule_sources_status.value?.domain.cache_exists &&
@@ -83,6 +87,31 @@ async function runRuntimeAction(
     await refresh();
   } finally {
     runtime_loading.value = false;
+  }
+}
+
+async function runLatencyAction(node_ids?: string[]) {
+  latency_loading.value = true;
+  try {
+    const result = await test_proxy_latency({
+      node_ids: node_ids || [],
+      targets: ["china", "global"],
+    });
+    if (!node_ids || node_ids.length === 0) {
+      latency_results.value = result;
+      return;
+    }
+
+    const next = new Map<string, ProxyLatencyTestResult>();
+    for (const item of latency_results.value) {
+      next.set(`${item.node_id}:${item.target}`, item);
+    }
+    for (const item of result) {
+      next.set(`${item.node_id}:${item.target}`, item);
+    }
+    latency_results.value = [...next.values()];
+  } finally {
+    latency_loading.value = false;
   }
 }
 
@@ -162,6 +191,14 @@ onMounted(refresh);
                 <n-button secondary @click="refresh">
                   {{ t("common.refresh") }}
                 </n-button>
+                <n-button
+                  secondary
+                  type="primary"
+                  :loading="latency_loading"
+                  @click="runLatencyAction"
+                >
+                  {{ t("proxy.latency_test_all") }}
+                </n-button>
               </n-flex>
             </n-flex>
             <n-empty
@@ -172,6 +209,9 @@ onMounted(refresh);
               v-else
               :nodes="nodes"
               :runtime-statuses="runtime_statuses"
+              :latency-results="latency_results"
+              :latency-loading="latency_loading"
+              @test-latency="runLatencyAction"
               @refresh="refresh"
             />
           </n-flex>
