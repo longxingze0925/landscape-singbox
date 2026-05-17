@@ -661,6 +661,11 @@ async fn run_system(
             tracing::warn!("failed to sync proxy bypass rules at startup: {err:?}");
         }
     });
+    startup_phase!("proxy_runtime_service.sync_runtime", {
+        if let Err(err) = proxy_runtime_service.sync_runtime().await {
+            tracing::warn!("failed to sync proxy runtime at startup: {err:?}");
+        }
+    });
 
     startup_phase!("metric_service.start_service", metric_service.start_service().await);
     let auth_share = Arc::new(ArcSwap::from_pointee(config.auth.clone()));

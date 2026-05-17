@@ -77,6 +77,7 @@ async fn add_proxy_node(
     JsonBody(proxy_node): JsonBody<ProxyNodeConfig>,
 ) -> LandscapeApiResult<ProxyNodeConfig> {
     let result = state.proxy_node_service.checked_set(proxy_node).await?;
+    let _ = state.proxy_runtime_service.sync_runtime().await;
     LandscapeApiResp::success(result)
 }
 

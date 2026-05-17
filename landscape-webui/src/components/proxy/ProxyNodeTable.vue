@@ -9,7 +9,15 @@ import type {
   ProxyNodeRuntimeStatus,
 } from "@landscape-router/types/api/schemas";
 import type { DataTableColumns } from "naive-ui";
-import { NButton, NEllipsis, NFlex, NPopconfirm, NTag, NText } from "naive-ui";
+import {
+  NButton,
+  NEllipsis,
+  NFlex,
+  NPopconfirm,
+  NTag,
+  NText,
+  NTooltip,
+} from "naive-ui";
 import { computed, h, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -24,7 +32,7 @@ const props = defineProps<{
   nodes: ProxyNodeConfig[];
   runtimeStatuses: ProxyNodeRuntimeStatus[];
   latencyResults: ProxyLatencyTestResult[];
-  latencyLoading: boolean;
+  latencyPendingNodeIds: string[];
 }>();
 const emit = defineEmits(["refresh", "test-latency"]);
 
@@ -46,6 +54,9 @@ const latency_map = computed(() => {
 const status_map = computed(
   () =>
     new Map(props.runtimeStatuses.map((status) => [status.node_id, status])),
+);
+const latency_pending_node_id_set = computed(
+  () => new Set(props.latencyPendingNodeIds),
 );
 
 const rows = computed<ProxyNodeRow[]>(() =>
@@ -193,7 +204,7 @@ const columns = computed<DataTableColumns<ProxyNodeRow>>(() => [
               {
                 secondary: true,
                 size: "tiny",
-                loading: props.latencyLoading,
+                loading: isLatencyPending(row.node.id),
                 disabled: !row.node.id,
                 onClick: () => emit("test-latency", [row.node.id]),
               },
@@ -290,17 +301,45 @@ function renderLatency(latency?: ProxyLatencyTestResult) {
       { default: () => `${latency.latency_ms} ms` },
     );
   }
-  const label = latency.error || t(`proxy.latency_state.${latency.state}`);
+  const label = latencyLabel(latency);
   return h(
-    NTag,
-    { size: "small", type: latencyStateType(latency.state), bordered: false },
-    { default: () => label },
+    NTooltip,
+    { trigger: "hover", disabled: !latency.error },
+    {
+      trigger: () =>
+        h(
+          NTag,
+          {
+            size: "small",
+            type: latencyStateType(latency.state),
+            bordered: false,
+          },
+          { default: () => latencyLabel(latency) },
+        ),
+      default: () => latency.error || label,
+    },
   );
 }
 
 function getLatency(node_id?: string, target?: "china" | "global") {
   if (!node_id || !target) return undefined;
   return latency_map.value.get(node_id)?.get(target);
+}
+
+function isLatencyPending(node_id?: string) {
+  return !!node_id && latency_pending_node_id_set.value.has(node_id);
+}
+
+function latencyLabel(latency: ProxyLatencyTestResult) {
+  if (latency.state === "success" && latency.latency_ms != null) {
+    return `${latency.latency_ms} ms`;
+  }
+  if (latency.state === "timeout") return t("proxy.latency_state.timeout");
+  if (latency.state === "disabled") return t("proxy.latency_state.disabled");
+  if (latency.state === "runtime_missing") {
+    return t("proxy.latency_state.runtime_missing");
+  }
+  return t("proxy.latency_state.failed");
 }
 
 function edit(node: ProxyNodeConfig) {

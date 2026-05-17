@@ -38,6 +38,12 @@ const runtime_loading = ref(false);
 const latency_loading = ref(false);
 const refresh_loading = ref(false);
 const latency_results = ref<ProxyLatencyTestResult[]>([]);
+const latency_pending_target_counts = ref<Record<string, number>>({});
+const latency_pending_node_ids = computed(() =>
+  Object.keys(latency_pending_target_counts.value),
+);
+const latency_run_seq = ref(0);
+const latency_targets = ["china", "global"] as const;
 const rule_sources_ready = computed(
   () =>
     bypass_rule_sources_status.value?.domain.cache_exists &&
@@ -120,28 +126,84 @@ async function runRuntimeAction(
   }
 }
 
+function normalizeLatencyNodeIds(node_ids?: string[]) {
+  const source =
+    node_ids && node_ids.length > 0
+      ? node_ids
+      : nodes.value.map((node) => node.id);
+  return [...new Set(source.filter((id): id is string => Boolean(id)))];
+}
+
+function mergeLatencyResults(result: ProxyLatencyTestResult[]) {
+  const next = new Map<string, ProxyLatencyTestResult>();
+  for (const item of latency_results.value) {
+    next.set(`${item.node_id}:${item.target}`, item);
+  }
+  for (const item of result) {
+    next.set(`${item.node_id}:${item.target}`, item);
+  }
+  latency_results.value = [...next.values()];
+}
+
+function beginLatencyNode(node_id: string) {
+  latency_pending_target_counts.value = {
+    ...latency_pending_target_counts.value,
+    [node_id]: latency_targets.length,
+  };
+}
+
+function finishLatencyTarget(node_id: string) {
+  const next = { ...latency_pending_target_counts.value };
+  const remain = (next[node_id] || 0) - 1;
+  if (remain > 0) {
+    next[node_id] = remain;
+  } else {
+    delete next[node_id];
+  }
+  latency_pending_target_counts.value = next;
+}
+
+async function runLatencyForNode(node_id: string, request_seq: number) {
+  beginLatencyNode(node_id);
+  await Promise.allSettled(
+    latency_targets.map(async (target) => {
+      try {
+        const result = await test_proxy_latency({
+          node_ids: [node_id],
+          targets: [target],
+        });
+        if (request_seq !== latency_run_seq.value) return;
+        mergeLatencyResults(result);
+      } catch (error) {
+        if (request_seq !== latency_run_seq.value) return;
+        message.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (request_seq === latency_run_seq.value) {
+          finishLatencyTarget(node_id);
+        }
+      }
+    }),
+  );
+}
+
 async function runLatencyAction(node_ids?: string[]) {
+  const ids = normalizeLatencyNodeIds(node_ids);
+  if (ids.length === 0) return;
+
+  const request_seq = latency_run_seq.value + 1;
+  latency_run_seq.value = request_seq;
+  latency_pending_target_counts.value = Object.fromEntries(
+    ids.map((id) => [id, latency_targets.length]),
+  );
   latency_loading.value = true;
   try {
-    const result = await test_proxy_latency({
-      node_ids: node_ids || [],
-      targets: ["china", "global"],
-    });
-    if (!node_ids || node_ids.length === 0) {
-      latency_results.value = result;
-      return;
-    }
-
-    const next = new Map<string, ProxyLatencyTestResult>();
-    for (const item of latency_results.value) {
-      next.set(`${item.node_id}:${item.target}`, item);
-    }
-    for (const item of result) {
-      next.set(`${item.node_id}:${item.target}`, item);
-    }
-    latency_results.value = [...next.values()];
+    await Promise.all(
+      ids.map((node_id) => runLatencyForNode(node_id, request_seq)),
+    );
   } finally {
-    latency_loading.value = false;
+    if (request_seq === latency_run_seq.value) {
+      latency_loading.value = false;
+    }
   }
 }
 
@@ -225,7 +287,7 @@ onMounted(refresh);
                   secondary
                   type="primary"
                   :loading="latency_loading"
-                  @click="runLatencyAction"
+                  @click="runLatencyAction()"
                 >
                   {{ t("proxy.latency_test_all") }}
                 </n-button>
@@ -240,7 +302,7 @@ onMounted(refresh);
               :nodes="nodes"
               :runtime-statuses="runtime_statuses"
               :latency-results="latency_results"
-              :latency-loading="latency_loading"
+              :latency-pending-node-ids="latency_pending_node_ids"
               @test-latency="runLatencyAction"
               @refresh="refresh"
             />
