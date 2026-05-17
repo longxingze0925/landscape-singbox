@@ -4,7 +4,7 @@ import {
   parseProxyShareLinks,
   type ParsedProxyShareLink,
 } from "@/lib/proxyShareLink";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMessage } from "naive-ui";
 
@@ -49,8 +49,8 @@ const tableRows = computed<ImportRow[]>(() =>
   })),
 );
 
-function parseInput() {
-  parsed.value = parseProxyShareLinks(input.value);
+function parseInput(value = input.value) {
+  parsed.value = parseProxyShareLinks(value);
   checked.value = importableIndexes.value;
 }
 
@@ -86,6 +86,9 @@ function featureLabel(item: ParsedProxyShareLink) {
 }
 
 async function importSelected() {
+  if (!parsed.value.length && input.value.trim()) {
+    parseInput();
+  }
   importing.value = true;
   import_errors.value = [];
   try {
@@ -120,6 +123,10 @@ async function importSelected() {
     importing.value = false;
   }
 }
+
+watch(input, (value) => {
+  parseInput(value);
+});
 </script>
 
 <template>
@@ -139,9 +146,6 @@ async function importSelected() {
       />
       <n-flex justify="space-between" align="center">
         <n-text depth="3">{{ t("proxy.share_link_supported") }}</n-text>
-        <n-button secondary @click="parseInput">
-          {{ t("proxy.parse_share_links") }}
-        </n-button>
       </n-flex>
       <n-alert v-if="import_errors.length" type="error" :bordered="false">
         <template #header>{{
