@@ -81,6 +81,8 @@ pub async fn create_pppoe_client(
                                 "native PPPoE reached ready state but failed to apply system/eBPF setup on iface={}",
                                 config.iface_name
                             );
+                            exited_with_error = true;
+                            break;
                         }
                     }
                     timeout_times = 0;

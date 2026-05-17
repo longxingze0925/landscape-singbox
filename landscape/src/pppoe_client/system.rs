@@ -59,6 +59,7 @@ impl PPPoEClientManager {
         let default_router = config.default_router;
         let session_id = *session_id;
         let server_mac_addr = server_mac_addr.clone();
+        let (ready_tx, ready_rx) = oneshot::channel::<Result<(), String>>();
         tokio::spawn(async move {
             tracing::info!(
                 "applying native PPPoE system state iface={} client_ip={} peer_ip={} mru={} session_id={}",
@@ -160,7 +161,30 @@ impl PPPoEClientManager {
             if let Err(e) = neight_run_result {
                 tracing::error!("add neigh error: {e:?}");
             }
-            let notise = pppoe::pppoe_tc::create_pppoe_tc_ebpf_3(index, session_id, mru).await;
+
+            let notise = match pppoe::pppoe_tc::create_pppoe_tc_ebpf_3(index, session_id, mru).await
+            {
+                Ok(notise) => {
+                    let _ = ready_tx.send(Ok(()));
+                    notise
+                }
+                Err(e) => {
+                    let error =
+                        format!("failed to enable native PPPoE TC/eBPF on iface {iface_name}: {e}");
+                    tracing::error!("{}", error);
+                    let _ = ready_tx.send(Err(error));
+                    cleanup_native_pppoe_system_state(
+                        index,
+                        &iface_name,
+                        client_ip,
+                        server_ip,
+                        default_router,
+                        route_service.as_ref(),
+                    )
+                    .await;
+                    return;
+                }
+            };
             let outside_callback = outside_notice_rx.await;
 
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -170,38 +194,15 @@ impl PPPoEClientManager {
                 }
             }
 
-            if let Err(e) = std::process::Command::new("ip")
-                .args(&[
-                    "addr",
-                    "del",
-                    &format!("{}", client_ip),
-                    "peer",
-                    &format!("{}/32", server_ip),
-                    "dev",
-                    &iface_name,
-                ])
-                .output()
-            {
-                tracing::error!(
-                    "failed to remove PPPoE peer address on iface {}: {e:?}",
-                    iface_name
-                );
-            }
-
-            if default_router {
-                LD_ALL_ROUTERS.del_route_by_iface(&iface_name).await;
-            }
-            if let Some(route_service) = route_service.as_ref() {
-                route_service.remove_ipv4_wan_route(&iface_name).await;
-                route_service.remove_ipv4_lan_route(&iface_name).await;
-            }
-            landscape_ebpf::map_setting::del_ipv4_wan_ip(index);
-            if let Err(e) = std::process::Command::new("ip")
-                .args(&["link", "set", "dev", &iface_name, "mtu", "1500"])
-                .output()
-            {
-                tracing::error!("failed to restore iface MTU after PPPoE teardown: {e:?}");
-            }
+            cleanup_native_pppoe_system_state(
+                index,
+                &iface_name,
+                client_ip,
+                server_ip,
+                default_router,
+                route_service.as_ref(),
+            )
+            .await;
 
             if let Ok(callback) = outside_callback {
                 let _ = callback.send(());
@@ -209,6 +210,55 @@ impl PPPoEClientManager {
             tracing::info!("native PPPoE system state cleaned up for iface={}", iface_name);
         });
 
-        Some(outside_notice_tx)
+        match ready_rx.await {
+            Ok(Ok(())) => Some(outside_notice_tx),
+            Ok(Err(e)) => {
+                tracing::error!("{}", e);
+                None
+            }
+            Err(e) => {
+                tracing::error!("native PPPoE setup task ended before ready signal: {e}");
+                None
+            }
+        }
+    }
+}
+
+async fn cleanup_native_pppoe_system_state(
+    index: u32,
+    iface_name: &str,
+    client_ip: std::net::Ipv4Addr,
+    server_ip: std::net::Ipv4Addr,
+    default_router: bool,
+    route_service: Option<&IpRouteService>,
+) {
+    if let Err(e) = std::process::Command::new("ip")
+        .args(&[
+            "addr",
+            "del",
+            &format!("{}", client_ip),
+            "peer",
+            &format!("{}/32", server_ip),
+            "dev",
+            iface_name,
+        ])
+        .output()
+    {
+        tracing::error!("failed to remove PPPoE peer address on iface {}: {e:?}", iface_name);
+    }
+
+    if default_router {
+        LD_ALL_ROUTERS.del_route_by_iface(iface_name).await;
+    }
+    if let Some(route_service) = route_service {
+        route_service.remove_ipv4_wan_route(iface_name).await;
+        route_service.remove_ipv4_lan_route(iface_name).await;
+    }
+    landscape_ebpf::map_setting::del_ipv4_wan_ip(index);
+    if let Err(e) = std::process::Command::new("ip")
+        .args(&["link", "set", "dev", iface_name, "mtu", "1500"])
+        .output()
+    {
+        tracing::error!("failed to restore iface MTU after PPPoE teardown: {e:?}");
     }
 }

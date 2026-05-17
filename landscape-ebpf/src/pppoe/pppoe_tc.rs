@@ -7,6 +7,7 @@ use libbpf_rs::{
 use tokio::sync::oneshot::error::TryRecvError;
 
 use crate::{
+    bpf_error::{LandscapeEbpfError, LdEbpfResult},
     landscape::TcHookProxy,
     map_setting::reuse_pinned_map_or_recreate,
     pipeline::wan_tc::{self, WanTcPipelineHandle},
@@ -21,24 +22,32 @@ pub async fn create_pppoe_tc_ebpf_3(
     ifindex: u32,
     session_id: u16,
     _mtu: u16,
-) -> tokio::sync::oneshot::Sender<tokio::sync::oneshot::Sender<()>> {
+) -> LdEbpfResult<tokio::sync::oneshot::Sender<tokio::sync::oneshot::Sender<()>>> {
     let (notice_tx, mut notice_rx) =
         tokio::sync::oneshot::channel::<tokio::sync::oneshot::Sender<()>>();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
 
     std::thread::spawn(move || {
         let pipeline = match WanTcPipelineHandle::acquire(ifindex) {
-            Ok(p) => p,
+            Ok(pipeline) => pipeline,
             Err(e) => {
-                tracing::error!("pppoe tc acquire pipeline failed for ifindex={}: {e}", ifindex);
+                let _ = ready_tx.send(Err(e));
                 return;
             }
         };
 
         let builder = landscape_pppoe::PppoeSkelBuilder::default();
         let mut open_object = MaybeUninit::uninit();
-        let mut pppoe_open =
-            crate::bpf_ctx!(builder.open(&mut open_object), "pppoe tc open skeleton failed")
-                .expect("pppoe tc open skeleton");
+        let mut pppoe_open = match crate::bpf_ctx!(
+            builder.open(&mut open_object),
+            "pppoe tc open skeleton failed"
+        ) {
+            Ok(pppoe_open) => pppoe_open,
+            Err(e) => {
+                let _ = ready_tx.send(Err(e.into()));
+                return;
+            }
+        };
         let ingress_path = wan_tc::wan_tc_pipeline_ingress_path(ifindex);
         let egress_path = wan_tc::wan_tc_pipeline_egress_path(ifindex);
         reuse_pinned_map_or_recreate(&mut pppoe_open.maps.ingress_stage_progs, &ingress_path);
@@ -48,13 +57,18 @@ pub async fn create_pppoe_tc_ebpf_3(
             pppoe_open.maps.rodata_data.as_deref_mut().expect("rodata is not memory mapped");
         rodata_data.session_id = session_id;
 
-        let pppoe_skel = crate::bpf_ctx!(pppoe_open.load(), "pppoe tc load skeleton failed")
-            .expect("pppoe tc load skeleton");
+        let pppoe_skel = match crate::bpf_ctx!(pppoe_open.load(), "pppoe tc load skeleton failed") {
+            Ok(pppoe_skel) => pppoe_skel,
+            Err(e) => {
+                let _ = ready_tx.send(Err(e.into()));
+                return;
+            }
+        };
 
         if let Err(e) =
             pipeline.register_pppoe(&pppoe_skel.progs.pppoe_ingress, &pppoe_skel.progs.pppoe_egress)
         {
-            tracing::error!("pppoe tc register in pipeline failed for ifindex={}: {e}", ifindex);
+            let _ = ready_tx.send(Err(e));
             return;
         }
 
@@ -63,6 +77,7 @@ pub async fn create_pppoe_tc_ebpf_3(
             ifindex,
             session_id
         );
+        let _ = ready_tx.send(Ok(()));
 
         let call_back = loop {
             match notice_rx.try_recv() {
@@ -83,7 +98,18 @@ pub async fn create_pppoe_tc_ebpf_3(
         drop(pppoe_skel);
     });
 
-    notice_tx
+    match ready_rx.recv() {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(e) => {
+            tracing::error!("pppoe tc ready channel closed for ifindex={}: {}", ifindex, e);
+            return Err(LandscapeEbpfError::Internal(format!(
+                "pppoe tc ready channel closed for ifindex={ifindex}: {e}"
+            )));
+        }
+    }
+
+    Ok(notice_tx)
 }
 
 pub async fn create_pppoe_tc_ebpf<'a>(

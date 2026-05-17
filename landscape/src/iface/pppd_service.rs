@@ -2,6 +2,7 @@ use std::io;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -95,6 +96,23 @@ fn wait_child_exit(child: &mut Child, timeout: Duration) -> io::Result<Option<Ex
             }
         }
     }
+}
+
+fn check_pppd_runtime() -> Result<(), String> {
+    match Command::new("pppd").arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status()
+    {
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err("pppd command not found, please install ppp/pppoe packages".to_string());
+        }
+        Err(e) => return Err(format!("failed to execute pppd --version: {e}")),
+    }
+
+    if !Path::new("/etc/ppp/peers").is_dir() {
+        return Err("/etc/ppp/peers does not exist, please install ppp first".to_string());
+    }
+
+    Ok(())
 }
 
 fn signal_child_process_group(child: &Child, signal: i32) -> io::Result<()> {
@@ -260,10 +278,15 @@ pub async fn create_pppd_thread(
 ) {
     service_status.just_change_status(ServiceStatus::Staring);
 
+    if let Err(e) = check_pppd_runtime() {
+        tracing::error!("PPPD runtime check failed for {}: {}", ppp_iface_name, e);
+        service_status.just_change_status(ServiceStatus::Failed);
+        return;
+    }
+
     let (tx, mut rx) = oneshot::channel::<()>();
     let (other_tx, other_rx) = oneshot::channel::<bool>();
 
-    service_status.just_change_status(ServiceStatus::Running);
     let service_status_clone = service_status.clone();
     spawn_task_with_resource(task_label::task::PPPD_STOP, ppp_iface_name.clone(), async move {
         let stop_wait = service_status_clone.wait_to_stopping();
@@ -290,6 +313,7 @@ pub async fn create_pppd_thread(
     let route_service_clone = route_service.clone();
     let ppp_ipv4_state_tx_clone = ppp_ipv4_state_tx.clone();
     let initial_ppp_ipv4_state_clone = initial_ppp_ipv4_state.clone();
+    let service_status_for_ip_watch = service_status.clone();
     spawn_task_with_resource(
         task_label::task::PPPD_IP_WATCH,
         ppp_iface_name_clone.clone(),
@@ -354,11 +378,17 @@ pub async fn create_pppd_thread(
                             } else {
                                 LD_ALL_ROUTERS.del_route_by_iface(&ppp_iface_name_clone).await;
                             }
+                            service_status_for_ip_watch.just_change_status(ServiceStatus::Running);
                         }
                     }
                     ip4addr = Some(new_ip4addr);
                 } else {
-                    ip4addr = None;
+                    if let Some((ifindex, _, _)) = ip4addr.take() {
+                        LD_ALL_ROUTERS.del_route_by_iface(&ppp_iface_name_clone).await;
+                        route_service_clone.remove_ipv4_wan_route(&ppp_iface_name_clone).await;
+                        route_service_clone.remove_ipv4_lan_route(&ppp_iface_name_clone).await;
+                        landscape_ebpf::map_setting::del_ipv4_wan_ip(ifindex);
+                    }
                 }
             }
         },
