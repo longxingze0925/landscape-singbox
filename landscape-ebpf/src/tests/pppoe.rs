@@ -210,6 +210,14 @@ fn pppoe_session_id_is_set_in_rodata() {
             ..Default::default()
         })
         .expect("pppoe_egress test_run");
+    skel.progs
+        .pppoe_xdp_ingress
+        .test_run(ProgramInput {
+            data_in: Some(&empty),
+            data_out: Some(&mut out),
+            ..Default::default()
+        })
+        .expect("pppoe_xdp_ingress test_run");
 }
 
 #[test]
@@ -238,4 +246,66 @@ fn pppoe_ingress_non_ppp_passes_unchanged() {
     let expected_unspec = u32::MAX; // -1 as u32
     assert_eq!(ret.return_value, expected_unspec, "non-PPP packet should return TC_ACT_UNSPEC");
     assert_eq!(&output[..original.len()], &original[..]);
+}
+
+#[test]
+fn pppoe_xdp_ingress_ipv4_removes_pppoe_header() {
+    let builder = pppoe_skel::PppoeSkelBuilder::default();
+    let mut open_object = MaybeUninit::uninit();
+    let mut pppoe_open = builder.open(&mut open_object).unwrap();
+    pppoe_open.maps.rodata_data.as_deref_mut().unwrap().session_id = SESSION_ID;
+    let skel = pppoe_open.load().unwrap();
+
+    let pppoe_pkt = build_pppoe_ipv4_packet();
+    let plain_pkt = build_ipv4_packet();
+    let mut output = vec![0u8; pppoe_pkt.len()];
+
+    let ret = skel
+        .progs
+        .pppoe_xdp_ingress
+        .test_run(ProgramInput {
+            data_in: Some(&pppoe_pkt),
+            data_out: Some(&mut output),
+            ..Default::default()
+        })
+        .expect("test_run pppoe_xdp_ingress ipv4");
+
+    assert_eq!(ret.return_value, 2, "XDP_PASS");
+    let data = ret.data.expect("xdp output data");
+    assert_eq!(data.len(), plain_pkt.len());
+    assert_eq!(&data[..12], &pppoe_pkt[..12]);
+    assert_eq!(data[12], 0x08);
+    assert_eq!(data[13], 0x00);
+    assert_eq!(&data[14..], &plain_pkt[14..]);
+}
+
+#[test]
+fn pppoe_xdp_ingress_ipv6_removes_pppoe_header() {
+    let builder = pppoe_skel::PppoeSkelBuilder::default();
+    let mut open_object = MaybeUninit::uninit();
+    let mut pppoe_open = builder.open(&mut open_object).unwrap();
+    pppoe_open.maps.rodata_data.as_deref_mut().unwrap().session_id = SESSION_ID;
+    let skel = pppoe_open.load().unwrap();
+
+    let pppoe_pkt = build_pppoe_ipv6_packet();
+    let plain_pkt = build_ipv6_packet();
+    let mut output = vec![0u8; pppoe_pkt.len()];
+
+    let ret = skel
+        .progs
+        .pppoe_xdp_ingress
+        .test_run(ProgramInput {
+            data_in: Some(&pppoe_pkt),
+            data_out: Some(&mut output),
+            ..Default::default()
+        })
+        .expect("test_run pppoe_xdp_ingress ipv6");
+
+    assert_eq!(ret.return_value, 2, "XDP_PASS");
+    let data = ret.data.expect("xdp output data");
+    assert_eq!(data.len(), plain_pkt.len());
+    assert_eq!(&data[..12], &pppoe_pkt[..12]);
+    assert_eq!(data[12], 0x86);
+    assert_eq!(data[13], 0xdd);
+    assert_eq!(&data[14..], &plain_pkt[14..]);
 }

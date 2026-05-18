@@ -1,8 +1,8 @@
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, os::fd::AsFd};
 
 use libbpf_rs::{
     skel::{OpenSkel, SkelBuilder},
-    TC_EGRESS,
+    Xdp, XdpFlags, TC_EGRESS,
 };
 use tokio::sync::oneshot::error::TryRecvError;
 
@@ -72,8 +72,18 @@ pub async fn create_pppoe_tc_ebpf_3(
             return;
         }
 
+        let xdp_ingress = Xdp::new(pppoe_skel.progs.pppoe_xdp_ingress.as_fd());
+        if let Err(e) = crate::bpf_ctx!(
+            xdp_ingress.attach(ifindex as i32, XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST),
+            "pppoe xdp ingress attach failed"
+        ) {
+            pipeline.unregister_pppoe();
+            let _ = ready_tx.send(Err(e.into()));
+            return;
+        }
+
         tracing::info!(
-            "pppoe tc pipeline registered for ifindex={} session_id={}",
+            "pppoe xdp ingress and tc pipeline registered for ifindex={} session_id={}",
             ifindex,
             session_id
         );
@@ -90,6 +100,11 @@ pub async fn create_pppoe_tc_ebpf_3(
         };
 
         pipeline.unregister_pppoe();
+        if let Err(e) =
+            xdp_ingress.detach(ifindex as i32, XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST)
+        {
+            tracing::warn!("pppoe xdp ingress detach failed for ifindex={}: {}", ifindex, e);
+        }
         tracing::info!("pppoe tc pipeline unregistered for ifindex={}", ifindex);
 
         if let Some(call_back) = call_back {

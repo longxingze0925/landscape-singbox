@@ -34,27 +34,34 @@ const volatile u16 session_id = 0x00;
 SEC("tc/ingress")
 int pppoe_ingress(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "pppoe_ingress"
-    void *data_end = (void *)(long)skb->data_end;
-    void *data = (void *)(long)skb->data;
+    return wan_tc_pipeline_continue_ingress(skb, INGRESS_STAGE_PPPOE, TC_ACT_UNSPEC);
+#undef BPF_LOG_TOPIC
+}
+
+SEC("xdp")
+int pppoe_xdp_ingress(struct xdp_md *ctx) {
+#define BPF_LOG_TOPIC "pppoe_xdp_ingress"
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
 
     struct ethhdr *eth = (struct ethhdr *)(data);
     if ((void *)(eth + 1) > data_end) {
-        ld_bpf_log("ingress packet too small for ethhdr");
-        return TC_ACT_SHOT;
+        ld_bpf_log("xdp ingress packet too small for ethhdr");
+        return XDP_DROP;
     }
 
     if (eth->h_proto != ETH_PPP) {
-        return wan_tc_pipeline_continue_ingress(skb, INGRESS_STAGE_PPPOE, TC_ACT_UNSPEC);
+        return XDP_PASS;
     }
 
     struct pppoe_header *pppoe_h = (struct pppoe_header *)(eth + 1);
     if ((void *)(pppoe_h + 1) > data_end) {
-        ld_bpf_log("ingress pppoe header out of range");
-        return TC_ACT_SHOT;
+        ld_bpf_log("xdp ingress pppoe header out of range");
+        return XDP_DROP;
     }
 
     if (pppoe_h->protocol != ETH_PPP_IPV4 && pppoe_h->protocol != ETH_PPP_IPV6) {
-        return wan_tc_pipeline_continue_ingress(skb, INGRESS_STAGE_PPPOE, TC_ACT_UNSPEC);
+        return XDP_PASS;
     }
 
     u16 new_proto = ETH_IPV4;
@@ -62,16 +69,30 @@ int pppoe_ingress(struct __sk_buff *skb) {
         new_proto = ETH_IPV6;
     }
 
-    int result = bpf_skb_adjust_room(skb, -8, BPF_ADJ_ROOM_MAC, 0);
+    u8 src_mac[6];
+    u8 dst_mac[6];
+    __builtin_memcpy(src_mac, eth->h_source, sizeof(src_mac));
+    __builtin_memcpy(dst_mac, eth->h_dest, sizeof(dst_mac));
+
+    int result = bpf_xdp_adjust_head(ctx, sizeof(struct pppoe_header));
     if (result) {
-        ld_bpf_log("ingress adjust room -8 failed %d", result);
-        return TC_ACT_SHOT;
+        ld_bpf_log("xdp ingress adjust head +8 failed %d", result);
+        return XDP_DROP;
     }
 
-    bpf_skb_store_bytes(skb, 12, &new_proto, sizeof(u16), 0);
-    bpf_skb_change_proto(skb, new_proto, 0);
+    data_end = (void *)(long)ctx->data_end;
+    data = (void *)(long)ctx->data;
+    eth = (struct ethhdr *)(data);
+    if ((void *)(eth + 1) > data_end) {
+        ld_bpf_log("xdp ingress adjusted packet too small for ethhdr");
+        return XDP_DROP;
+    }
 
-    return wan_tc_pipeline_continue_ingress(skb, INGRESS_STAGE_PPPOE, TC_ACT_UNSPEC);
+    __builtin_memcpy(eth->h_source, src_mac, sizeof(src_mac));
+    __builtin_memcpy(eth->h_dest, dst_mac, sizeof(dst_mac));
+    eth->h_proto = new_proto;
+
+    return XDP_PASS;
 #undef BPF_LOG_TOPIC
 }
 
