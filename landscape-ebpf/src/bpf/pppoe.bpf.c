@@ -31,7 +31,7 @@ const volatile u16 session_id = 0x00;
 #define ETH_IPV4 bpf_htons(0x0800)
 #define ETH_IPV6 bpf_htons(0x86DD)
 
-SEC("tc")
+SEC("tc/ingress")
 int pppoe_ingress(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "pppoe_ingress"
     void *data_end = (void *)(long)skb->data_end;
@@ -75,7 +75,7 @@ int pppoe_ingress(struct __sk_buff *skb) {
 #undef BPF_LOG_TOPIC
 }
 
-SEC("tc")
+SEC("tc/egress")
 int pppoe_egress(struct __sk_buff *skb) {
 #define BPF_LOG_TOPIC "pppoe_egress"
     void *data_end = (void *)(long)skb->data_end;
