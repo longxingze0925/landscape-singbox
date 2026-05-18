@@ -1,6 +1,7 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
+    process::Command,
     time::Duration,
 };
 
@@ -205,6 +206,8 @@ pub async fn dhcp_v4_client(
         server_port,
     );
 
+    sync_existing_iface_ipv4(ifindex, &iface_name, default_router, &route_service, &mac_addr).await;
+
     service_status.just_change_status(ServiceStatus::Running);
     tracing::info!("DHCP V4 Client Running");
 
@@ -289,6 +292,7 @@ pub async fn dhcp_v4_client(
     }
     route_service.remove_ipv4_wan_route(&iface_name).await;
     route_service.remove_ipv4_lan_route(&iface_name).await;
+    landscape_ebpf::map_setting::del_ipv4_wan_ip(ifindex);
 
     if !service_status.is_stop() {
         service_status.just_change_status(if service_status.is_exit() {
@@ -296,6 +300,103 @@ pub async fn dhcp_v4_client(
         } else {
             ServiceStatus::Failed
         });
+    }
+}
+
+fn is_usable_iface_ipv4(addr: Ipv4Addr) -> bool {
+    !addr.is_unspecified()
+        && !addr.is_loopback()
+        && !addr.is_broadcast()
+        && !addr.is_multicast()
+        && !addr.is_link_local()
+}
+
+fn read_default_gateway_for_iface(iface_name: &str) -> Option<Ipv4Addr> {
+    let output =
+        Command::new("ip").args(["route", "show", "default", "dev", iface_name]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut words = stdout.split_whitespace();
+    while let Some(word) = words.next() {
+        if word == "via" {
+            return words.next()?.parse().ok();
+        }
+    }
+    None
+}
+
+async fn sync_existing_iface_ipv4(
+    ifindex: u32,
+    iface_name: &str,
+    default_router: bool,
+    route_service: &IpRouteService,
+    mac_addr: &MacAddr,
+) {
+    let Some(info) = crate::addresses_by_iface_id(ifindex).await.into_iter().find_map(|info| {
+        match info.address {
+            IpAddr::V4(addr) if is_usable_iface_ipv4(addr) => Some((addr, info.prefix_len)),
+            _ => None,
+        }
+    }) else {
+        return;
+    };
+
+    let (iface_ip, prefix) = info;
+    let gateway_ip = read_default_gateway_for_iface(iface_name);
+
+    landscape_ebpf::map_setting::add_ipv4_wan_ip(
+        ifindex,
+        iface_ip,
+        gateway_ip,
+        prefix,
+        Some(mac_addr.clone()),
+    );
+
+    route_service
+        .insert_ipv4_lan_route(
+            iface_name,
+            LanRouteInfo {
+                ifindex,
+                iface_name: iface_name.to_string(),
+                iface_ip: IpAddr::V4(iface_ip),
+                mac: Some(mac_addr.clone()),
+                prefix,
+                mode: LanRouteMode::Reachable,
+            },
+        )
+        .await;
+
+    if let Some(gateway_ip) = gateway_ip {
+        route_service
+            .insert_ipv4_wan_route(
+                iface_name,
+                RouteTargetInfo {
+                    ifindex,
+                    weight: 1,
+                    mac: Some(mac_addr.clone()),
+                    is_docker: false,
+                    default_route: default_router,
+                    iface_name: iface_name.to_string(),
+                    iface_ip: IpAddr::V4(iface_ip),
+                    gateway_ip: IpAddr::V4(gateway_ip),
+                },
+            )
+            .await;
+
+        if default_router {
+            LD_ALL_ROUTERS
+                .add_route(RouteInfo {
+                    iface_name: iface_name.to_string(),
+                    weight: 1,
+                    route: RouteType::Ipv4(gateway_ip),
+                })
+                .await;
+        } else {
+            LD_ALL_ROUTERS.del_route_by_iface(iface_name).await;
+        }
     }
 }
 

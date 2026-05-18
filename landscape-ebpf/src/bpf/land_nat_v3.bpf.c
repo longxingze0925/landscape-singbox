@@ -74,6 +74,7 @@ int nat_v4_egress(struct __sk_buff *skb) {
     if (ret) return wan_tc_pipeline_continue_egress(skb, EGRESS_STAGE_NAT, ret);
     ret = is_broadcast_ip4_pair(&ip_pair);
     if (ret != TC_ACT_OK) return wan_tc_pipeline_continue_egress(skb, EGRESS_STAGE_NAT, ret);
+
     ret = frag_info_track_v4(&pkg_offset, &ip_pair);
     if (ret != TC_ACT_OK) return TC_ACT_SHOT;
 
@@ -110,14 +111,14 @@ int nat_v4_egress(struct __sk_buff *skb) {
     };
     __be16 nat_port = nat_egress_value->port;
     if (!is_dynamic) {
-        struct wan_ip_info_key wan_search_key = {
+        struct wan_ip_info_key static_wan_search_key = {
             .ifindex = skb->ifindex,
             .l3_protocol = LANDSCAPE_IPV4_TYPE,
         };
-        struct wan_ip_info_value *wan_ip_info =
-            bpf_map_lookup_elem(&wan_ip_binding, &wan_search_key);
-        if (!wan_ip_info) return TC_ACT_SHOT;
-        nat_addr.addr = wan_ip_info->addr.ip;
+        struct wan_ip_info_value *static_wan_ip_info =
+            bpf_map_lookup_elem(&wan_ip_binding, &static_wan_search_key);
+        if (!static_wan_ip_info) return TC_ACT_SHOT;
+        nat_addr.addr = static_wan_ip_info->addr.ip;
     }
 
     struct inet4_pair server_nat_pair = {
@@ -189,6 +190,15 @@ int nat_v4_ingress(struct __sk_buff *skb) {
 
     ret = nat4_v3_ingress_lookup_or_new_mapping4(nat_l4_protocol, &ip_pair, &nat_ingress_value);
     if (ret != TC_ACT_OK || !nat_ingress_value) {
+        struct wan_ip_info_key wan_search_key = {
+            .ifindex = skb->ifindex,
+            .l3_protocol = LANDSCAPE_IPV4_TYPE,
+        };
+        struct wan_ip_info_value *wan_ip_info =
+            bpf_map_lookup_elem(&wan_ip_binding, &wan_search_key);
+        if (wan_ip_info && ip_pair.dst_addr.addr == wan_ip_info->addr.ip) {
+            return wan_tc_pipeline_continue_ingress(skb, INGRESS_STAGE_NAT, TC_ACT_UNSPEC);
+        }
         return TC_ACT_SHOT;
     }
 
@@ -328,6 +338,10 @@ SEC("tc/egress")
 int egress_nat(struct __sk_buff *skb) {
     bool is_ipv4;
     int ret;
+
+    if (skb->ingress_ifindex == 0) {
+        return wan_tc_pipeline_continue_egress(skb, EGRESS_STAGE_NAT, TC_ACT_UNSPEC);
+    }
 
     if (likely(current_l3_offset > 0)) {
         ret = is_broadcast_mac(skb);
