@@ -190,25 +190,25 @@ fn attach_pppoe_xdp(xdp_ingress: &Xdp<'_>, ifindex: i32) -> crate::bpf_error::Ld
             }
 
             tracing::warn!(
-                "replacing stale pppoe xdp program id={} name={} on ifindex={}",
+                "detaching stale pppoe xdp program id={} name={} on ifindex={}",
                 existing_id,
                 existing_name,
                 ifindex
             );
-            let old_prog_fd = libbpf_rs::Program::fd_from_id(existing_id).map_err(|source| {
+            xdp_ingress.detach(ifindex, XdpFlags::SKB_MODE).map_err(|source| {
                 crate::bpf_error::LandscapeEbpfError::Context {
+                    context: format!("pppoe xdp detach stale program failed on ifindex {ifindex}"),
+                    source,
+                }
+            })?;
+            xdp_ingress.attach(ifindex, XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST).map_err(
+                |source| crate::bpf_error::LandscapeEbpfError::Context {
                     context: format!(
-                        "pppoe xdp open existing program fd failed on ifindex {ifindex}"
+                        "pppoe xdp attach after stale detach failed on ifindex {ifindex}"
                     ),
                     source,
-                }
-            })?;
-            xdp_ingress.replace(ifindex, old_prog_fd.as_fd()).map_err(|source| {
-                crate::bpf_error::LandscapeEbpfError::Context {
-                    context: format!("pppoe xdp replace failed on ifindex {ifindex}"),
-                    source,
-                }
-            })?;
+                },
+            )?;
             Ok(())
         }
         Err(err) => Err(err.into()),
