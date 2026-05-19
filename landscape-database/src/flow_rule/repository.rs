@@ -7,7 +7,9 @@ use landscape_common::flow::{
     FlowEntryMatchMode, FlowEntryRule, FlowTarget, ResolvedFlowEntryMatchMode,
     ResolvedFlowEntryRule, RuntimeFlowConfig,
 };
-use landscape_common::proxy::{proxy_container_name, proxy_node_id_from_container_name};
+use landscape_common::proxy::{
+    proxy_container_name, proxy_node_id_from_container_name, PROXY_RUNTIME_CONTAINER_NAME,
+};
 use migration::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 
@@ -117,43 +119,7 @@ impl FlowConfigRepository {
 
     pub async fn find_by_target(&self, t: FlowTarget) -> Result<Vec<FlowConfig>, LdError> {
         // 构造条件 SQL 和参数
-        let (condition_sql, params) = match t {
-            FlowTarget::Interface { name } => (
-                "json_extract(json_each.value, '$.target.t') = 'interface' AND json_extract(json_each.value, '$.target.name') = ?".to_string(),
-                vec![sea_orm::Value::String(Some(Box::new(name)))],
-            ),
-            FlowTarget::Netns { container_name } => {
-                if let Some(node_id) = proxy_node_id_from_container_name(&container_name) {
-                    (
-                        "(
-                            (
-                                json_extract(json_each.value, '$.target.t') = 'netns'
-                                AND json_extract(json_each.value, '$.target.container_name') = ?
-                            )
-                            OR
-                            (
-                                json_extract(json_each.value, '$.target.t') = 'proxy'
-                                AND json_extract(json_each.value, '$.target.node_id') = ?
-                            )
-                        )"
-                        .to_string(),
-                        vec![
-                            sea_orm::Value::String(Some(Box::new(container_name))),
-                            sea_orm::Value::String(Some(Box::new(node_id.to_string()))),
-                        ],
-                    )
-                } else {
-                    (
-                        "json_extract(json_each.value, '$.target.t') = 'netns' AND json_extract(json_each.value, '$.target.container_name') = ?".to_string(),
-                        vec![sea_orm::Value::String(Some(Box::new(container_name)))],
-                    )
-                }
-            }
-            FlowTarget::Proxy { node_id, .. } => (
-                "json_extract(json_each.value, '$.target.t') = 'proxy' AND json_extract(json_each.value, '$.target.node_id') = ?".to_string(),
-                vec![sea_orm::Value::String(Some(Box::new(node_id.to_string())))],
-            ),
-        };
+        let (condition_sql, params) = build_target_match_condition(t);
 
         let full_sql = format!(
             "EXISTS (
@@ -376,6 +342,62 @@ pub fn find_duplicate_resolved_modes(
     None
 }
 
+fn build_target_match_condition(t: FlowTarget) -> (String, Vec<sea_orm::Value>) {
+    match t {
+        FlowTarget::Interface { name } => (
+            "json_extract(json_each.value, '$.target.t') = 'interface' AND json_extract(json_each.value, '$.target.name') = ?".to_string(),
+            vec![sea_orm::Value::String(Some(Box::new(name)))],
+        ),
+        FlowTarget::Netns { container_name } => {
+            if let Some(node_id) = proxy_node_id_from_container_name(&container_name) {
+                (
+                    "(
+                        (
+                            json_extract(json_each.value, '$.target.t') = 'netns'
+                            AND json_extract(json_each.value, '$.target.container_name') = ?
+                        )
+                        OR
+                        (
+                            json_extract(json_each.value, '$.target.t') = 'proxy'
+                            AND json_extract(json_each.value, '$.target.node_id') = ?
+                        )
+                    )"
+                    .to_string(),
+                    vec![
+                        sea_orm::Value::String(Some(Box::new(container_name))),
+                        sea_orm::Value::String(Some(Box::new(node_id.to_string()))),
+                    ],
+                )
+            } else if container_name == PROXY_RUNTIME_CONTAINER_NAME {
+                // Proxy runtime uses one shared container for all proxy targets.
+                (
+                    "(
+                        (
+                            json_extract(json_each.value, '$.target.t') = 'netns'
+                            AND json_extract(json_each.value, '$.target.container_name') = ?
+                        )
+                        OR
+                        (
+                            json_extract(json_each.value, '$.target.t') = 'proxy'
+                        )
+                    )"
+                    .to_string(),
+                    vec![sea_orm::Value::String(Some(Box::new(container_name)))],
+                )
+            } else {
+                (
+                    "json_extract(json_each.value, '$.target.t') = 'netns' AND json_extract(json_each.value, '$.target.container_name') = ?".to_string(),
+                    vec![sea_orm::Value::String(Some(Box::new(container_name)))],
+                )
+            }
+        }
+        FlowTarget::Proxy { node_id, .. } => (
+            "json_extract(json_each.value, '$.target.t') = 'proxy' AND json_extract(json_each.value, '$.target.node_id') = ?".to_string(),
+            vec![sea_orm::Value::String(Some(Box::new(node_id.to_string())))],
+        ),
+    }
+}
+
 pub fn resolve_flow_target_for_route(target: &FlowTarget) -> FlowTarget {
     match target {
         FlowTarget::Proxy { node_id, .. } => {
@@ -388,9 +410,17 @@ pub fn resolve_flow_target_for_route(target: &FlowTarget) -> FlowTarget {
 #[cfg(test)]
 mod tests {
     use super::{find_duplicate_resolved_modes, find_missing_device_id, DevicesById};
+    use crate::provider::LandscapeDBServiceProvider;
+    use landscape_common::database::LandscapeStore;
     use landscape_common::enrolled_device::EnrolledDevice;
-    use landscape_common::flow::{FlowEntryMatchMode, ResolvedFlowEntryMatchMode};
+    use landscape_common::flow::{
+        config::FlowConfig, FlowEntryMatchMode, FlowTarget, ResolvedFlowEntryMatchMode,
+        WeightedFlowTarget,
+    };
     use landscape_common::net::MacAddr;
+    use landscape_common::proxy::{
+        ProxyMode, PROXY_CONTAINER_NAME_PREFIX, PROXY_RUNTIME_CONTAINER_NAME,
+    };
     use sea_orm::prelude::Uuid;
     use std::collections::HashMap;
 
@@ -441,6 +471,81 @@ mod tests {
         )]);
 
         assert_eq!(find_missing_device_id(modes.iter(), &devices), None);
+    }
+
+    #[test]
+    fn proxy_runtime_container_matches_proxy_targets() {
+        let (sql, params) = super::build_target_match_condition(FlowTarget::Netns {
+            container_name: PROXY_RUNTIME_CONTAINER_NAME.to_string(),
+        });
+
+        assert!(sql.contains("json_extract(json_each.value, '$.target.t') = 'proxy'"));
+        assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn ordinary_netns_target_does_not_match_proxy_targets() {
+        let (sql, params) = super::build_target_match_condition(FlowTarget::Netns {
+            container_name: "ordinary-container".to_string(),
+        });
+
+        assert!(!sql.contains("json_extract(json_each.value, '$.target.t') = 'proxy'"));
+        assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn legacy_per_node_proxy_container_matches_that_proxy_node() {
+        let node_id = Uuid::new_v4();
+        let (sql, params) = super::build_target_match_condition(FlowTarget::Netns {
+            container_name: format!("{PROXY_CONTAINER_NAME_PREFIX}{node_id}"),
+        });
+
+        assert!(sql.contains("json_extract(json_each.value, '$.target.t') = 'proxy'"));
+        assert!(sql.contains("json_extract(json_each.value, '$.target.node_id') = ?"));
+        assert_eq!(params.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn find_by_target_runtime_container_loads_proxy_flow_configs() {
+        let provider = LandscapeDBServiceProvider::mem_test_db().await;
+        let repo = provider.flow_rule_store();
+        let proxy_flow = FlowConfig {
+            id: Uuid::new_v4(),
+            enable: true,
+            flow_id: 7,
+            flow_match_rules: vec![],
+            flow_targets: vec![WeightedFlowTarget::new(
+                FlowTarget::Proxy { node_id: Uuid::new_v4(), mode: ProxyMode::Global },
+                1,
+            )],
+            remark: "proxy".to_string(),
+            update_at: 0.0,
+        };
+        let ordinary_netns_flow = FlowConfig {
+            id: Uuid::new_v4(),
+            enable: true,
+            flow_id: 8,
+            flow_match_rules: vec![],
+            flow_targets: vec![WeightedFlowTarget::new(
+                FlowTarget::Netns { container_name: "ordinary-container".to_string() },
+                1,
+            )],
+            remark: "netns".to_string(),
+            update_at: 0.0,
+        };
+
+        repo.set(proxy_flow.clone()).await.expect("insert proxy flow");
+        repo.set(ordinary_netns_flow).await.expect("insert netns flow");
+
+        let matches = repo
+            .find_by_target(FlowTarget::Netns {
+                container_name: PROXY_RUNTIME_CONTAINER_NAME.to_string(),
+            })
+            .await
+            .expect("find by proxy runtime container");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, proxy_flow.id);
     }
 }
 

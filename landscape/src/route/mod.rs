@@ -697,7 +697,10 @@ pub async fn test_used_ip_route() -> (mpsc::Sender<RouteEvent>, IpRouteService) 
 mod tests {
     use std::time::Duration;
 
-    use landscape_common::flow::WeightedFlowTarget;
+    use landscape_common::{
+        flow::WeightedFlowTarget,
+        proxy::{ProxyMode, PROXY_RUNTIME_CONTAINER_NAME},
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -1164,6 +1167,10 @@ mod tests {
         )
     }
 
+    fn proxy_target(node_id: Uuid, weight: u32) -> WeightedFlowTarget {
+        WeightedFlowTarget::new(FlowTarget::Proxy { node_id, mode: ProxyMode::Global }, weight)
+    }
+
     #[test]
     fn collect_refresh_enabled_flow_with_matching_targets() {
         let mut wan_infos = WanRoutesByOwner::new();
@@ -1242,6 +1249,24 @@ mod tests {
         let targets = result.get(&3).expect("flow_id 3 should be present");
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].0.iface_name, "ns0");
+        assert_eq!(targets[0].1, 5);
+    }
+
+    #[test]
+    fn collect_refresh_proxy_target_resolves_to_shared_runtime_container() {
+        let mut wan_infos = WanRoutesByOwner::new();
+        wan_infos.insert(
+            PROXY_RUNTIME_CONTAINER_NAME.to_string(),
+            ipv4_wan_route(PROXY_RUNTIME_CONTAINER_NAME, Ipv4Addr::new(10, 0, 0, 1)),
+        );
+
+        let configs = vec![flow_config(3, true, vec![proxy_target(Uuid::new_v4(), 5)])];
+
+        let result = collect_target_refresh_result(&configs, &wan_infos);
+
+        let targets = result.get(&3).expect("flow_id 3 should be present");
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].0.iface_name, PROXY_RUNTIME_CONTAINER_NAME);
         assert_eq!(targets[0].1, 5);
     }
 
