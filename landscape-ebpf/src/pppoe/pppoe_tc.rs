@@ -162,7 +162,7 @@ pub async fn create_pppoe_tc_ebpf<'a>(
 fn attach_pppoe_xdp(xdp_ingress: &Xdp<'_>, ifindex: i32) -> crate::bpf_error::LdEbpfResult<()> {
     match xdp_ingress.attach(ifindex, XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST) {
         Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+        Err(err) if is_stale_pppoe_xdp_attach_error(&err) => {
             tracing::warn!(
                 "pppoe xdp already attached on ifindex={}, checking whether it is our own program",
                 ifindex
@@ -213,4 +213,15 @@ fn attach_pppoe_xdp(xdp_ingress: &Xdp<'_>, ifindex: i32) -> crate::bpf_error::Ld
         }
         Err(err) => Err(err.into()),
     }
+}
+
+fn is_stale_pppoe_xdp_attach_error(err: &libbpf_rs::Error) -> bool {
+    if err.kind() == ErrorKind::AlreadyExists {
+        return true;
+    }
+
+    let err_text = err.to_string();
+    err_text.contains("Device or resource busy")
+        || err_text.contains("already attached")
+        || err_text.contains("os error 16")
 }
