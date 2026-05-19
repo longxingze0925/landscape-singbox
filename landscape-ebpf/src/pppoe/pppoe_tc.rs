@@ -1,8 +1,9 @@
 use std::{mem::MaybeUninit, os::fd::AsFd};
 
 use libbpf_rs::{
+    query::ProgInfoIter,
     skel::{OpenSkel, SkelBuilder},
-    Xdp, XdpFlags, TC_EGRESS,
+    ErrorKind, Xdp, XdpFlags, TC_EGRESS,
 };
 use tokio::sync::oneshot::error::TryRecvError;
 
@@ -73,12 +74,9 @@ pub async fn create_pppoe_tc_ebpf_3(
         }
 
         let xdp_ingress = Xdp::new(pppoe_skel.progs.pppoe_xdp_ingress.as_fd());
-        if let Err(e) = crate::bpf_ctx!(
-            xdp_ingress.attach(ifindex as i32, XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST),
-            "pppoe xdp ingress attach failed"
-        ) {
+        if let Err(e) = attach_pppoe_xdp(&xdp_ingress, ifindex as i32) {
             pipeline.unregister_pppoe();
-            let _ = ready_tx.send(Err(e.into()));
+            let _ = ready_tx.send(Err(e));
             return;
         }
 
@@ -159,4 +157,60 @@ pub async fn create_pppoe_tc_ebpf<'a>(
         drop(pppoe_egress_builder);
     });
     (notice_tx, pppoe_skel)
+}
+
+fn attach_pppoe_xdp(xdp_ingress: &Xdp<'_>, ifindex: i32) -> crate::bpf_error::LdEbpfResult<()> {
+    match xdp_ingress.attach(ifindex, XdpFlags::SKB_MODE | XdpFlags::UPDATE_IF_NOEXIST) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+            tracing::warn!(
+                "pppoe xdp already attached on ifindex={}, checking whether it is our own program",
+                ifindex
+            );
+            let existing_id =
+                xdp_ingress.query_id(ifindex, XdpFlags::SKB_MODE).map_err(|source| {
+                    crate::bpf_error::LandscapeEbpfError::Context {
+                        context: format!("pppoe xdp query failed on ifindex {ifindex}"),
+                        source,
+                    }
+                })?;
+
+            let mut prog_iter = ProgInfoIter::default();
+            let Some(existing_prog) = prog_iter.find(|prog| prog.id == existing_id) else {
+                return Err(crate::bpf_error::LandscapeEbpfError::Internal(format!(
+                    "pppoe xdp existing program id {existing_id} not found on ifindex {ifindex}"
+                )));
+            };
+
+            let existing_name = existing_prog.name.as_c_str().to_string_lossy();
+            if !existing_name.contains("pppoe_xdp") {
+                return Err(crate::bpf_error::LandscapeEbpfError::Internal(format!(
+                    "pppoe xdp already attached on ifindex {ifindex} by non-pppoe program {existing_name}"
+                )));
+            }
+
+            tracing::warn!(
+                "replacing stale pppoe xdp program id={} name={} on ifindex={}",
+                existing_id,
+                existing_name,
+                ifindex
+            );
+            let old_prog_fd = libbpf_rs::Program::fd_from_id(existing_id).map_err(|source| {
+                crate::bpf_error::LandscapeEbpfError::Context {
+                    context: format!(
+                        "pppoe xdp open existing program fd failed on ifindex {ifindex}"
+                    ),
+                    source,
+                }
+            })?;
+            xdp_ingress.replace(ifindex, old_prog_fd.as_fd()).map_err(|source| {
+                crate::bpf_error::LandscapeEbpfError::Context {
+                    context: format!("pppoe xdp replace failed on ifindex {ifindex}"),
+                    source,
+                }
+            })?;
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
 }

@@ -75,6 +75,15 @@ impl DefaultRouterManager {
         let mut ipv6_nexthops = Vec::new();
 
         if infos.is_empty() {
+            let ipv4_command = vec!["route", "del", "default"];
+            if let Err(e) = std::process::Command::new("ip").args(ipv4_command).output() {
+                tracing::error!("{:?}", e);
+            }
+
+            let ipv6_command = vec!["-6", "route", "del", "default"];
+            if let Err(e) = std::process::Command::new("ip").args(ipv6_command).output() {
+                tracing::error!("{:?}", e);
+            }
         } else {
             for info in infos.iter() {
                 // 根据 RouteInfo 的类型生成适当的 nexthop
