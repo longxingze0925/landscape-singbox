@@ -40,6 +40,22 @@ const NODE_TEST_PORT_BASE: u32 = 12100;
 const LATENCY_TEST_TIMEOUT_SECS: u64 = 8;
 const CHINA_LATENCY_TEST_URL: &str = "https://www.baidu.com";
 const GLOBAL_LATENCY_TEST_URL: &str = "https://www.gstatic.com/generate_204";
+const PRIVATE_DIRECT_IP_CIDRS: &[&str] = &[
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "224.0.0.0/4",
+    "240.0.0.0/4",
+    "255.255.255.255/32",
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10",
+    "ff00::/8",
+];
 
 #[derive(Clone)]
 pub struct ProxyRuntimeService {
@@ -650,6 +666,7 @@ fn build_sing_box_config(
             }));
             selector_tag
         };
+        route_rules.push(private_direct_route_rule(&inbound_tag));
         route_rules.push(json!({
             "inbound": [inbound_tag],
             "outbound": outbound
@@ -668,6 +685,14 @@ fn build_sing_box_config(
             "final": "proxy"
         }
     }))
+}
+
+fn private_direct_route_rule(inbound_tag: &str) -> Value {
+    json!({
+        "inbound": [inbound_tag],
+        "ip_cidr": PRIVATE_DIRECT_IP_CIDRS,
+        "outbound": "direct"
+    })
 }
 
 fn flow_tproxy_port(flow_id: u32) -> Result<u16, ProxyError> {
@@ -950,6 +975,22 @@ mod tests {
         }));
 
         let route_rules = config["route"]["rules"].as_array().expect("route rules");
+        let private_direct_index = route_rules
+            .iter()
+            .position(|rule| {
+                rule["inbound"] == json!(["flow-7"])
+                    && rule["outbound"] == "direct"
+                    && rule["ip_cidr"] == json!(PRIVATE_DIRECT_IP_CIDRS)
+            })
+            .expect("flow private direct rule");
+        let proxy_index = route_rules
+            .iter()
+            .position(|rule| {
+                rule["inbound"] == json!(["flow-7"])
+                    && rule["outbound"] == node_outbound_tag(second_id)
+            })
+            .expect("flow proxy rule");
+        assert!(private_direct_index < proxy_index);
         assert!(route_rules.iter().any(|rule| {
             rule["inbound"] == json!(["flow-7"]) && rule["outbound"] == node_outbound_tag(second_id)
         }));
