@@ -9,7 +9,7 @@ on:
       landscape_repository:
         description: Landscape source repository
         required: true
-        default: ThisSeanZhang/landscape
+        default: longxingze0925/landscape-singbox
       landscape_ref:
         description: Landscape source branch, tag, or commit
         required: true
@@ -28,7 +28,7 @@ permissions:
   packages: write
 
 env:
-  LANDSCAPE_REPOSITORY: ${{ inputs.landscape_repository || 'ThisSeanZhang/landscape' }}
+  LANDSCAPE_REPOSITORY: ${{ inputs.landscape_repository || github.repository }}
   LANDSCAPE_REF: ${{ inputs.landscape_ref || 'main' }}
   SING_BOX_VERSION: ${{ inputs.sing_box_version || '1.12.22' }}
   IMAGE_TAG: ${{ inputs.image_tag || 'latest' }}

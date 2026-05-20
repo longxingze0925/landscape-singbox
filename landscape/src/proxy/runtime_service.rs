@@ -414,7 +414,7 @@ impl ProxyRuntimeService {
                 "LAND_PROXY_SERVER_ADDR=0.0.0.0".to_string(),
                 "LAND_PROXY_SERVER_ADDR_V6=::".to_string(),
                 format!("LAND_PROXY_SERVER_PORT={DEFAULT_FLOW_TPROXY_PORT}"),
-                "LAND_PROXY_HANDLE_MODE=multiple_tproxy".to_string(),
+                "LAND_PROXY_HANDLE_MODE=multiple-tproxy".to_string(),
             ]),
             labels: Some(std::collections::HashMap::from([(
                 "ld_flow_edge".to_string(),

@@ -24,6 +24,7 @@ use tracing_subscriber::filter::LevelFilter;
 pub enum HandleMode {
     Tproxy,
     Route,
+    #[value(alias = "multiple_tproxy")]
     MultipleTproxy,
 }
 
