@@ -117,7 +117,7 @@ impl From<&EffectiveDohListenerConfig> for DohRuntimeConfig {
 }
 
 pub async fn create_udp_socket(address: SocketAddr) -> std::io::Result<(UdpSocket, i32)> {
-    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+    let socket = Socket::new(socket_domain(&address), Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_port(true)?;
     socket.set_nonblocking(true)?;
     socket.bind(&address.into())?;
@@ -129,7 +129,7 @@ pub async fn create_udp_socket(address: SocketAddr) -> std::io::Result<(UdpSocke
 }
 
 pub fn create_tcp_listener(address: SocketAddr) -> std::io::Result<(tokio::net::TcpListener, i32)> {
-    let socket = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP))?;
+    let socket = Socket::new(socket_domain(&address), Type::STREAM, Some(Protocol::TCP))?;
     socket.set_reuse_port(true)?;
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
@@ -140,6 +140,13 @@ pub fn create_tcp_listener(address: SocketAddr) -> std::io::Result<(tokio::net::
     let listener: std::net::TcpListener = socket.into();
     let listener = tokio::net::TcpListener::from_std(listener)?;
     Ok((listener, fd))
+}
+
+fn socket_domain(address: &SocketAddr) -> Domain {
+    match address {
+        SocketAddr::V4(_) => Domain::IPV4,
+        SocketAddr::V6(_) => Domain::IPV6,
+    }
 }
 
 pub async fn start_flow_dns_listener(

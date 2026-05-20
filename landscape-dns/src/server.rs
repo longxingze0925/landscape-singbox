@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     net::IpAddr,
-    net::{Ipv6Addr, SocketAddr, SocketAddrV6},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     sync::Arc,
 };
 
@@ -51,6 +51,7 @@ pub struct LandscapeDnsServer {
     pub msg_tx: MetricSenderState,
     // 监听 UDP DNS 地址
     pub udp_listener_addr: SocketAddr,
+    pub udp_listener_addr_v4: SocketAddr,
     cache_live_config: Arc<ArcSwap<CacheRuntimeConfig>>,
     doh_listener: Option<DohListenerState>,
 }
@@ -94,6 +95,7 @@ impl LandscapeDnsServer {
                 0,
                 0,
             )),
+            udp_listener_addr_v4: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, listen_port)),
             msg_tx: Arc::new(ArcSwapOption::new(msg_tx.map(Arc::new))),
             cache_live_config: Arc::new(ArcSwap::from_pointee(cache_runtime)),
             doh_listener: doh.map(DohListenerState::from_effective_config),
@@ -283,7 +285,7 @@ impl LandscapeDnsServer {
     ) -> CancellationToken {
         start_flow_dns_listener(
             flow_id,
-            self.udp_listener_addr,
+            self.udp_listener_addr_v4,
             self.build_effective_doh_listener_config(desired_doh_runtime),
             handler,
         )
